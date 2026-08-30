@@ -1,6 +1,6 @@
 # Project state — Roulette-Kaki
 
-Last updated: 2026-08-30 (Phase 3.5b complete — real SPRS scraper live behind SCRAPER_MODE=sprs)
+Last updated: 2026-08-30 (Phase 4 complete — research agent + chat endpoint live)
 
 Single source of truth for what's built, what's next, and what's blocked.
 
@@ -10,7 +10,7 @@ Single source of truth for what's built, what's next, and what's blocked.
 
 | Feature | Status | Notes |
 |---|---|---|
-| BlogPost — Parliament Debate Digest | **Phase 3.5b complete — real SPRS scraper live.** `SCRAPER_MODE=sprs` calls SPRS's `/search/searchResult` + `/search/getHansardTopic` endpoints via httpx. No Playwright at runtime. Ready to run `scripts/prepopulate_digests.py` for real showcase dates. | See `ARCHITECTURE.md`, `AGENTS.md`, `scripts/README.md`. |
+| BlogPost — Parliament Debate Digest | **Phase 4 complete — chat endpoint live.** `POST /debates/{date}/chat` wires the research agent: session-state DDB row (TTL 1h), lazy S3 report cache, Nova Pro Converse with document blocks at message 0 for stable prompt caching. Frontend (Phase 5) is next. | See `ARCHITECTURE.md`, `AGENTS.md`, `scripts/README.md`. |
 | Chatbot                              | Not started — stub directories only  | `Chatbot/backend`, `Chatbot/frontend` exist but are empty. |
 | Translation                          | Not started — empty stub file        | `Translation/main.py` is empty. |
 
@@ -65,10 +65,19 @@ Phase 4 (research agent) are next.
         `scripts/prepopulate_digests.py --dates <5-10 recent sittings>
         --config` with `SCRAPER_MODE=sprs` against real AWS. Not blocking
         Phase 4; a demo-prep task.
-- [ ] **Phase 4 — Research agent with document blocks.** Load
-      `topics_loaded` documents from S3, attach as Converse `document`
-      blocks with prompt-cache flags, call Nova Pro, parse `grounded`
-      marker, persist chat history + TTL refresh.
+- [x] **Phase 4 — Research agent with document blocks.**
+      `agents/research.py::run_chat` implements the full flow: load/create
+      session → validate `topic_id` against digest → S3 cache hit or
+      lazy-scrape → build Nova `document` blocks → Nova Pro Converse
+      with docs+cachePoint at **message 0** for cache-stable prefix
+      across turns → parse `<grounded>false</grounded>` marker →
+      persist chat_history + TTL refresh. `main.py::chat` returns
+      HTTP 400 on missing digest and 503 in fixture mode (no report
+      bytes). `bedrock.py::chat_with_documents` refactored to place
+      docs at message 0 (was: current turn). 7 in-sandbox tests cover
+      first turn, follow-up cache-stable prefix, no-topic guardrail
+      (no Bedrock call), fabricated topic_id, 5-topic cap, grounded
+      marker parse+strip, missing-digest ValueError.
 - [ ] **Phase 5 — Frontend.** Vite + React scaffold, blog feed, detail page
       with chat + topic dropdown.
 - [ ] **Phase 6 — Package + deploy.** Dockerfile on Lambda Python base image,

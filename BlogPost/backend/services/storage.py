@@ -24,10 +24,10 @@ import time
 import boto3
 from botocore.exceptions import ClientError
 
-REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
+REGION = os.environ.get("AWS_REGION", "us-east-1")
 DIGESTS_TABLE = os.environ.get("DIGESTS_TABLE", "DebateDigests")
 SESSIONS_TABLE = os.environ.get("SESSIONS_TABLE", "ChatSessions")
-CACHE_BUCKET = os.environ.get("CACHE_BUCKET", "parl-debate-cache")
+CACHE_BUCKET = os.environ.get("CACHE_BUCKET", "parl-debate-cache-v2")
 
 SESSION_TTL_SECONDS = 3600  # 1 hour, refreshed on every message.
 

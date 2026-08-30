@@ -46,8 +46,8 @@ backend/
 │   ├── scraper.py          SCRAPER_MODE dispatch (fixture / sprs)
 │   └── scraper_sprs.py     Real SPRS httpx client (Phase 3.5b, LIVE)
 └── agents/
-    ├── digest.py           Digest agent (LIVE, fixture-backed)
-    └── research.py         Research agent (stub — Phase 4)
+    ├── digest.py           Digest agent (LIVE, fixture + sprs)
+    └── research.py         Research agent (LIVE, docs at message 0)
 ```
 
 | File | Role |
@@ -59,7 +59,7 @@ backend/
 | [`services/scraper.py`](services/scraper.py) | Dispatch on `SCRAPER_MODE`. `fixture` reads `fixtures/topics_{date}.json` (metadata only, no report bytes). `sprs` delegates to `scraper_sprs.py` for both `list_topics` and `fetch_report`. |
 | [`services/scraper_sprs.py`](services/scraper_sprs.py) | Real SPRS scraper. `POST /search/searchResult` for topic lists (paginated, advances by actual page size, terminates on `maxResult` or empty response). `POST /search/getHansardTopic` for per-topic HTML transcripts (wrapped in a minimal HTML envelope with title + speakers). httpx client with browser-like User-Agent, `SPRS_REQUEST_DELAY` throttle (0.5s default), single retry on 429/5xx. |
 | [`agents/digest.py`](agents/digest.py) | `run_digest(date)` **live**. Cache check → topic list → prompt build → `bedrock.summarize` → JSON parse → strip fabricated topic_ids → `storage.put_digest` → return. Returns `{"error": "no_sitting"}` (and skips DDB write) if the date has no fixture / no sitting. |
-| [`agents/research.py`](agents/research.py) | `run_chat(session_id, date, message, topic_id)` — raises `NotImplementedError` in Phase 2. Ships with the finalized `SYSTEM_PROMPT` and the `<grounded>false</grounded>` marker parser so Phase 4 only needs to wire the flow. |
+| [`agents/research.py`](agents/research.py) | `run_chat(session_id, date, message, topic_id)` **live**. Loads/creates DDB session (TTL 1h, refreshed on write). Validates `topic_id` against the cached digest's topics; unknown IDs are logged + skipped. Fetches report bytes lazily (S3 cache first, `scraper.fetch_report` on miss). Skips Bedrock entirely if no docs attach ("pick a topic" reply). Passes plain-text history to `bedrock.chat_with_documents` which places docs+cachePoint at message 0 for cache-stable prefix. Parses `<grounded>false</grounded>` and strips it from both returned and persisted reply. |
 
 ---
 
@@ -104,7 +104,7 @@ Interactive Swagger UI: **http://localhost:8000/docs**.
 | `GET`  | `/health`                    | `{"status": "ok", "phase": 3}` |
 | `GET`  | `/debates`                   | Stub list; Phase 5+ will scan DDB. |
 | `GET`  | `/debates/{date}`            | **Live digest.** `date` = `YYYY-MM-DD` (e.g. `2026-08-05`). Runs digest agent on cache miss; returns HTTP 404 `{"detail":{"error":"no_sitting", ...}}` when no fixture / no sitting exists. |
-| `POST` | `/debates/{date}/chat`       | Still stub echo reply. Body: `{"message": "...", "session_id"?, "topic_id"?}`. Phase 4 wires the research agent. |
+| `POST` | `/debates/{date}/chat`       | **Live.** Body: `{"message": "...", "session_id"?, "topic_id"?}`. Returns `{"session_id", "reply", "topics_used", "grounded"}`. HTTP 400 if the date has no digest yet (call `GET /debates/{date}` first). HTTP 503 in `SCRAPER_MODE=fixture` (fixtures don't have report bodies). |
 
 Sample:
 
@@ -172,27 +172,17 @@ default at runtime and Bedrock calls will 404 on the Singapore model IDs.
 
 ---
 
-## What's next — Phase 3.5c (pre-populate demo digests) or Phase 4 (research agent)
+## What's next — Phase 5 (frontend) or Phase 3.5c (pre-populate demo digests)
 
-Independent — do either or both.
+Both work independently. Phase 5 is the last "build" phase before packaging.
 
-**Phase 3.5c — one-time demo prep.** Now that `SCRAPER_MODE=sprs` works,
-warm the DDB cache with 5-10 real sitting digests so demo day doesn't
-depend on live scraping. Full runbook in
-[`../../scripts/README.md`](../../scripts/README.md). TL;DR:
+**Phase 5 — frontend.** Vite + React app hosted on S3 + CloudFront. Two
+views: blog feed (`GET /debates`) and detail-with-chat
+(`GET /debates/{date}` + `POST /debates/{date}/chat`). Chat UI should
+surface a topic dropdown so the user picks a `topic_id` to attach — the
+backend already accepts it.
 
-```bash
-cd terraform && terraform apply         # if not already done
-cd ../scripts
-export AWS_REGION=<your region> SCRAPER_MODE=sprs
-../.venv/bin/python prepopulate_digests.py --dates 2026-08-05 2026-07-15 ...
-```
-
-Cost: ~$0.001 per date. First real hit against SPRS also verifies the
-scraper end-to-end (whether Imperva accepts our User-Agent, etc.).
-
-**Phase 4 — research agent.** See AGENTS.md → Research agent contract.
-Everything upstream is in place — `services/bedrock.py::chat_with_documents`
-enforces caps + prompt caching, `services/storage.py::{get,put}_session`
-handles TTL, `services/scraper.py::fetch_report` returns HTML bytes for
-Nova `document` blocks. Just wire the flow in `agents/research.py`.
+**Phase 3.5c — pre-populate showcase digests.** One-time run of
+`scripts/prepopulate_digests.py` against 5-10 real sitting dates with
+`SCRAPER_MODE=sprs`. Warms DDB so demo day doesn't depend on live SPRS.
+Costs ~$0.01 total.

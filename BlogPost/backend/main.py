@@ -126,19 +126,22 @@ def chat(date: str, req: ChatRequest) -> ChatResponse:
             message=req.message,
             topic_id=req.topic_id,
         )
-        return ChatResponse(
-            session_id=session_id,
-            reply=result.reply,
-            topics_used=result.topics_used,
-            grounded=result.grounded,
+    except ValueError as e:
+        # e.g. no digest for date — caller must GET /debates/{date} first.
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "no_digest_for_date", "message": str(e)},
         )
-    except NotImplementedError:
-        return ChatResponse(
-            session_id=session_id,
-            reply=(
-                f"[stub, phase 2] echoing message for {date}: {req.message!r} "
-                "— Phase 4 wires the research agent."
-            ),
-            topics_used=[req.topic_id] if req.topic_id else [],
-            grounded=False,
+    except NotImplementedError as e:
+        # Reached scraper.fetch_report in a mode that doesn't have report
+        # bytes (SCRAPER_MODE=fixture). Tell the caller how to fix it.
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "scraper_not_available", "message": str(e)},
         )
+    return ChatResponse(
+        session_id=session_id,
+        reply=result.reply,
+        topics_used=result.topics_used,
+        grounded=result.grounded,
+    )

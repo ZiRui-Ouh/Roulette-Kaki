@@ -22,8 +22,8 @@ from typing import Literal
 import boto3
 from botocore.config import Config
 
-# REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
-REGION = "us-east-1"
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+# REGION = "us-east-1"
 
 MODEL_NOVA_LITE = "amazon.nova-lite-v1:0"
 MODEL_NOVA_PRO = "amazon.nova-pro-v1:0"
@@ -109,22 +109,44 @@ def chat_with_documents(
 ) -> tuple[str, list[str], dict]:
     """Chat turn with attached documents.
 
-    The 5-topic / 50K-token caps are enforced here — callers cannot bypass
-    them. Documents are followed by a `cachePoint` block so Bedrock caches
-    them across turns in the same session.
+    The 5-topic / 50K-token caps are enforced here — callers cannot
+    bypass them. Documents + `cachePoint` are always placed in **message
+    0**, prepended to whatever the user's first-turn text was. The prefix
+    up to cachePoint is byte-stable across every turn in a session, so
+    Bedrock prompt caching reliably hits after turn 1.
+
+    `history` contract: `[{"role": "user"|"assistant", "content": str}]`.
+    Plain-text messages only — no doc blocks, no `<grounded>` markers.
+    Callers are responsible for stripping markers before passing.
 
     Returns (reply_text, kept_topic_ids, usage_dict).
     """
     capped = _cap_documents(docs)
 
-    current_user_content: list[dict] = _document_blocks(capped)
+    doc_prefix: list[dict] = _document_blocks(capped)
     if capped:
-        # Cache the (large, stable) document tail; the user message text
-        # sits after the cachePoint and is billed fresh on every turn.
-        current_user_content.append({"cachePoint": {"type": "default"}})
-    current_user_content.append({"text": user_message})
+        # Everything before cachePoint is cacheable. Docs live here so
+        # the cache prefix stays byte-identical across turns.
+        doc_prefix.append({"cachePoint": {"type": "default"}})
 
-    messages = [*history, {"role": "user", "content": current_user_content}]
+    if not history:
+        # First turn — docs + current user text in one message.
+        first_content: list[dict] = [*doc_prefix, {"text": user_message}]
+        messages: list[dict] = [{"role": "user", "content": first_content}]
+    else:
+        # Rebuild message 0 with docs + original first-user text.
+        assert history[0]["role"] == "user", (
+            "history must start with a user message"
+        )
+        first_content = [*doc_prefix, {"text": history[0]["content"]}]
+        messages = [{"role": "user", "content": first_content}]
+        for m in history[1:]:
+            messages.append(
+                {"role": m["role"], "content": [{"text": m["content"]}]}
+            )
+        messages.append(
+            {"role": "user", "content": [{"text": user_message}]}
+        )
 
     resp = _client().converse(
         modelId=model_id,

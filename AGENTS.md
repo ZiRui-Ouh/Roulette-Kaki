@@ -69,32 +69,35 @@ inadequate on Nova Lite for interactive Q&A.
 
 **Contract — no embeddings, document blocks instead:**
 
-1. Read the session's `topics_loaded` list from DynamoDB.
-2. If the current message has a `topic_id` field and it isn't already in
-   `topics_loaded`, append it (subject to the caps below).
-3. For each topic in `topics_loaded`, fetch its cached report bytes from
-   S3 via `storage.get_report(date, topic_id, ext)`. On miss, call
-   `scraper.fetch_report(topic)` to pull the report from SPRS, then
-   `storage.put_report(...)` to cache it under `{date}/{topic_id}.{ext}`
-   before proceeding. `scraper.fetch_report` in `SCRAPER_MODE=sprs` calls
-   `POST /search/getHansardTopic` with `{"id": topic_id}` and returns a
-   UTF-8 HTML document (title + speakers + transcript) ready to attach
-   to a Nova `document` block with `format="html"`. This is the
-   **lazy-scrape** step — reports are fetched only when the user
-   actually asks about the topic, not proactively at digest time.
-4. Call Bedrock Converse with:
-   - `system` — grounding prompt (see below).
-   - `messages` — prior `chat_history` + current user message.
-   - `document` blocks — one per topic in `topics_loaded`, marked as
-     cacheable via Bedrock's prompt cache flags.
-5. Parse the response:
-   - Extract `reply` (assistant text).
-   - Extract `grounded: bool` — the model is instructed to output a
-     structured marker (e.g. an XML tag) when the answer isn't in the
-     attached documents; parse that marker.
-   - `topics_used` = the `topics_loaded` list at the time of the call.
-6. Append user + assistant messages to `chat_history`, refresh TTL, write
-   back to DynamoDB.
+1. Load session from DDB (`storage.get_session`) or create a fresh row
+   in memory if none exists.
+2. Load the digest for `date` (`storage.get_digest`). If missing or
+   `error: "no_sitting"`, raise `ValueError` — the caller must
+   `GET /debates/{date}` first. Build `{topic_id → topic_meta}` from
+   `digest.topics`.
+3. If the request's `topic_id` is present in the digest and not already
+   in `topics_loaded`, append it. Unknown `topic_id`s are logged and
+   ignored (no session pollution).
+4. For each topic in `topics_loaded`: fetch report bytes from
+   `storage.get_report(date, topic_id, ext)`. On miss, call
+   `scraper.fetch_report(topic)` (SPRS `POST /search/getHansardTopic`)
+   and `storage.put_report(...)` to cache. This is the **lazy-scrape**
+   step — reports are fetched only when the user first asks about the
+   topic.
+5. Empty-doc guardrail: if no docs are attached (empty session, no
+   valid `topic_id`), return a "pick a topic" reply **without calling
+   Bedrock**. Log the turn to session and return.
+6. Call `bedrock.chat_with_documents(SYSTEM_PROMPT, history, message, docs)`.
+   `history` is plain-text `[{role, content: str}]`; `bedrock.py` places
+   docs + `cachePoint` at **message 0** (see cache placement below), so
+   the intra-session prompt cache reliably hits after turn 1.
+7. Parse the `<grounded>false</grounded>` marker in the reply. Strip
+   the marker from the visible reply (both the returned reply and what
+   gets persisted to chat_history).
+8. Mirror `bedrock`'s returned `kept_topic_ids` into
+   `session.topics_loaded` (bedrock may have dropped the oldest topic
+   if the 5/50K cap kicked in). Append user + assistant messages to
+   `chat_history`. Write via `storage.put_session` (refreshes TTL).
 
 **System prompt shape:**
 
@@ -117,8 +120,11 @@ Rules:
   Whichever hits first triggers drop-oldest. Enforced in
   `services/bedrock.py`, not in the agent itself, so the cap is impossible
   to bypass from higher-level code.
-- **Prompt caching MUST be enabled on all `document` blocks.** This is
-  what keeps Nova Pro affordable across a multi-turn session.
+- **Prompt caching MUST be enabled on all `document` blocks, and
+  docs+cachePoint MUST live at message 0.** Placing them on the current
+  turn's user message would rotate the cache prefix every turn and
+  defeat the point. `bedrock.py::chat_with_documents` enforces the
+  message-0 layout; `research.py` passes plain-text history in.
 - **No shared / persistent vector index anywhere.** If a future feature
   needs cross-session retrieval, it goes through the S3 cache tier, not a
   vector store.

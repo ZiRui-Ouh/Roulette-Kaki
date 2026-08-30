@@ -1,6 +1,6 @@
 output "region" {
   description = "Region resources were provisioned in."
-  value       = var.region
+  value       = "us-east-1"
 }
 
 output "digests_table_name" {
