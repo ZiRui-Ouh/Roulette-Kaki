@@ -45,8 +45,12 @@ def list_topics(date: str) -> list[TopicMeta]:
     """
     if SCRAPER_MODE == "fixture":
         return _list_topics_from_fixture(date)
-    raise NotImplementedError(
-        f"SCRAPER_MODE={SCRAPER_MODE!r} not implemented — Phase 3.5 lands the real SPRS backend"
+    if SCRAPER_MODE == "sprs":
+        from services import scraper_sprs  # local import — httpx dep only when needed
+
+        return [TopicMeta(**item) for item in scraper_sprs.list_topics(date)]
+    raise ValueError(
+        f"unknown SCRAPER_MODE={SCRAPER_MODE!r} — expected 'fixture' or 'sprs'"
     )
 
 
@@ -60,8 +64,22 @@ def _list_topics_from_fixture(date: str) -> list[TopicMeta]:
 
 
 def fetch_report(topic: TopicMeta) -> bytes:
-    """Fetch raw report bytes for a topic. Phase 4 (research agent) will
-    implement — reports are scraped lazily on first user mention, not
+    """Fetch raw report bytes for a topic. Used by the research agent
+    (Phase 4) — reports are scraped lazily on first user mention, not
     up-front at digest time.
+
+    SCRAPER_MODE=fixture still raises — fixtures only include metadata,
+    not report bytes. Set SCRAPER_MODE=sprs to actually fetch.
     """
-    raise NotImplementedError("Phase 4 — research agent scrapes on demand")
+    if SCRAPER_MODE == "sprs":
+        from services import scraper_sprs  # local import
+
+        return scraper_sprs.fetch_report(topic)
+    if SCRAPER_MODE == "fixture":
+        raise NotImplementedError(
+            "SCRAPER_MODE=fixture does not include report bodies. "
+            "Set SCRAPER_MODE=sprs to fetch transcripts from SPRS."
+        )
+    raise ValueError(
+        f"unknown SCRAPER_MODE={SCRAPER_MODE!r} — expected 'fixture' or 'sprs'"
+    )

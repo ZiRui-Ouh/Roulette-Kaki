@@ -25,16 +25,19 @@ throughput, plenty of quality for summarization.
 **Tools:**
 
 - `list_topics(date: str) -> list[TopicMeta]`  (in `services/scraper.py`)
-  - Phase 3: reads `backend/fixtures/topics_{date}.json`. Returns `[]` if
-    no sitting.
-  - Phase 3.5: swaps in real SPRS. Recon on 2026-08-30 showed SPRS is an
-    Angular SPA with no discoverable REST endpoints — first pass will use
-    Playwright instrumented with `page.on("request")` to capture the real
-    API traffic, then decide whether to fall back to `httpx`.
-  - Returns topic titles, speakers, source URLs, and format hint.
-  - **Does NOT fetch report bodies.** Report PDFs/HTML are scraped
-    lazily by the research agent (see below), keyed by the same
-    `topic_id` for the S3 cache.
+  - `SCRAPER_MODE=fixture`: reads `backend/fixtures/topics_{date}.json`.
+    Returns `[]` if no sitting.
+  - `SCRAPER_MODE=sprs`: dispatches to `services/scraper_sprs.py`, which
+    calls `POST https://sprs.parl.gov.sg/search/searchResult` with the
+    date range and paginates until all reports are collected.
+  - Returns topic titles, source URLs, and format hint (`"html"`).
+    **`speakers` is always `[]`** at this layer — SPRS's search endpoint
+    doesn't include speaker names in the list view. The research agent
+    fetches speakers via `getHansardTopic` when it fetches the report
+    body (Phase 4 lazy-scrape).
+  - **Does NOT fetch report bodies.** Report HTML is scraped lazily by
+    the research agent (see below), keyed by the same `topic_id` for
+    the S3 cache.
 
 - `bedrock.summarize(prompt)`  (in `services/bedrock.py`)
   - Single Nova Lite call over topic titles + speakers.
@@ -73,9 +76,12 @@ inadequate on Nova Lite for interactive Q&A.
    S3 via `storage.get_report(date, topic_id, ext)`. On miss, call
    `scraper.fetch_report(topic)` to pull the report from SPRS, then
    `storage.put_report(...)` to cache it under `{date}/{topic_id}.{ext}`
-   before proceeding. This is the **lazy-scrape** step — reports are
-   fetched only when the user actually asks about the topic, not
-   proactively at digest time.
+   before proceeding. `scraper.fetch_report` in `SCRAPER_MODE=sprs` calls
+   `POST /search/getHansardTopic` with `{"id": topic_id}` and returns a
+   UTF-8 HTML document (title + speakers + transcript) ready to attach
+   to a Nova `document` block with `format="html"`. This is the
+   **lazy-scrape** step — reports are fetched only when the user
+   actually asks about the topic, not proactively at digest time.
 4. Call Bedrock Converse with:
    - `system` — grounding prompt (see below).
    - `messages` — prior `chat_history` + current user message.

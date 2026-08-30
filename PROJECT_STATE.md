@@ -1,6 +1,6 @@
 # Project state — Roulette-Kaki
 
-Last updated: 2026-08-30 (Phase 3 complete)
+Last updated: 2026-08-30 (Phase 3.5b complete — real SPRS scraper live behind SCRAPER_MODE=sprs)
 
 Single source of truth for what's built, what's next, and what's blocked.
 
@@ -10,7 +10,7 @@ Single source of truth for what's built, what's next, and what's blocked.
 
 | Feature | Status | Notes |
 |---|---|---|
-| BlogPost — Parliament Debate Digest | **Phase 3 complete — digest agent live (fixture-backed), Terraform module written** | See `ARCHITECTURE.md`, `AGENTS.md`. AWS resources land on `terraform apply`. |
+| BlogPost — Parliament Debate Digest | **Phase 3.5b complete — real SPRS scraper live.** `SCRAPER_MODE=sprs` calls SPRS's `/search/searchResult` + `/search/getHansardTopic` endpoints via httpx. No Playwright at runtime. Ready to run `scripts/prepopulate_digests.py` for real showcase dates. | See `ARCHITECTURE.md`, `AGENTS.md`, `scripts/README.md`. |
 | Chatbot                              | Not started — stub directories only  | `Chatbot/backend`, `Chatbot/frontend` exist but are empty. |
 | Translation                          | Not started — empty stub file        | `Translation/main.py` is empty. |
 
@@ -46,11 +46,25 @@ Phase 4 (research agent) are next.
       digests with an HTTP 404 for no-sitting dates. Terraform module at
       `terraform/` defines `DebateDigests`, `ChatSessions` (TTL on `ttl`),
       and `parl-debate-cache` bucket with public access blocked.
-- [ ] **Phase 3.5 — Real SPRS scraper.** Flip `SCRAPER_MODE=sprs`.
-      Recon on 2026-08-30 confirmed SPRS is an Angular SPA with no
-      discoverable REST endpoints — first pass will need Playwright
-      instrumented to capture the real API traffic, then decide whether
-      to fall back to `httpx`.
+- [🚧] **Phase 3.5 — Real SPRS scraper.** Split across two turns because
+      the scraper can't be written blind.
+      - [x] **3.5a — Recorder + scaffolding.** Playwright recorder,
+        batch pre-populate script, docs.
+      - [x] **3.5b — Real SPRS scraper.** `services/scraper_sprs.py`
+        talks to SPRS via pure httpx (no runtime Playwright needed —
+        the API is clean JSON). Two endpoints in use:
+        `POST /search/searchResult` (paginated topic list with maxResult
+        gate + advance-by-actual-page-size) and
+        `POST /search/getHansardTopic` (per-topic HTML transcript,
+        wrapped in a minimal HTML envelope for Nova's `document`
+        blocks). `services/scraper.py` dispatches on `SCRAPER_MODE`.
+        Sanity-tested against 3 mocked pagination scenarios
+        (server-capped small pages, full-page, empty). Rate-limited
+        with `SPRS_REQUEST_DELAY` (0.5s default) + one retry on 429/5xx.
+      - [ ] **3.5c — Real showcase digests in DDB.** Run
+        `scripts/prepopulate_digests.py --dates <5-10 recent sittings>
+        --config` with `SCRAPER_MODE=sprs` against real AWS. Not blocking
+        Phase 4; a demo-prep task.
 - [ ] **Phase 4 — Research agent with document blocks.** Load
       `topics_loaded` documents from S3, attach as Converse `document`
       blocks with prompt-cache flags, call Nova Pro, parse `grounded`

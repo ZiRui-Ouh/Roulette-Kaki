@@ -7,7 +7,7 @@
       "Leader of the Opposition",
       "Member for Aljunied GRC"
     ],
-    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T1-20260805",
+    "source_url": "https://sprs.parl.gov.sg/search/#/sprs3topic?reportid=T1-motion-cost-of-living",
     "format": "pdf"
   },
   {
@@ -17,7 +17,7 @@
       "Minister for Transport",
       "Member for Sengkang GRC"
     ],
-    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T2-20260805",
+    "source_url": "https://sprs.parl.gov.sg/search/#/sprs3topic?reportid=T2-question-public-transport",
     "format": "pdf"
   },
   {
@@ -28,7 +28,7 @@
       "Member for Bukit Panjang SMC",
       "Member for Jurong GRC"
     ],
-    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T3-20260805",
+    "source_url": "https://sprs.parl.gov.sg/search/#/sprs3topic?reportid=T3-bill-pdpa-amendment",
     "format": "pdf"
   },
   {
@@ -38,7 +38,7 @@
       "Minister for National Development",
       "Member for Marine Parade GRC"
     ],
-    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T4-20260805",
+    "source_url": "https://sprs.parl.gov.sg/search/#/sprs3topic?reportid=T4-question-bto-wait-times",
     "format": "pdf"
   },
   {
@@ -48,7 +48,7 @@
       "Minister for Sustainability and the Environment",
       "Member for West Coast GRC"
     ],
-    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T5-20260805",
+    "source_url": "https://sprs.parl.gov.sg/search/#/sprs3topic?reportid=T5-adjournment-climate-resilience",
     "format": "pdf"
   },
   {
@@ -58,7 +58,7 @@
       "Minister for Health",
       "Member for Nee Soon GRC"
     ],
-    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T6-20260805",
+    "source_url": "https://sprs.parl.gov.sg/search/#/sprs3topic?reportid=T6-question-healthcare-workforce",
     "format": "pdf"
   }
 ]
