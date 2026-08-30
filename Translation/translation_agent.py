@@ -9,15 +9,31 @@ client = boto3.client("bedrock-runtime", region_name="us-east-1")
 # Set the model ID, e.g., Amazon Nova Lite.
 model_id = "us.amazon.nova-2-lite-v1:0"
 
+# Select language
+to_translate = input("Please input the text you want to translate: ")
+languages = {"Chinese", "Malay", "Tamil"}
+
+def select_by_name(options_set):
+    while True:
+        print(f"\nAvailable options: {', '.join(options_set)}")
+        choice = input("Type your choice: ").strip()
+        
+        if choice in options_set:
+            return choice
+            
+        print("That item is not in the set. Please try again.")
+
+target_language = select_by_name(languages)
+prompt = f"You are a helpful translator. Translate the sentence after ':' directly into {target_language} without any extra conversational filler: {to_translate}"
+
+print(prompt)
 # Start a conversation with the user message.
-user_message = "Please translate the following text to english 我喜欢吃冰淇淋."
 conversation = [
     {
         "role": "user",
-        "content": [{"text": user_message}],
+        "content": [{"text": prompt}],
     }
 ]
-
 try:
     # Send the message to the model, using a basic inference configuration.
     response = client.converse(
