@@ -70,6 +70,25 @@ def put_digest(digest: dict) -> None:
     _ddb().Table(DIGESTS_TABLE).put_item(Item=digest)
 
 
+def list_digests(limit: int = 50) -> list[dict]:
+    """List cached digests, most recent first. Compact projection —
+    only returns `date`, `title`, `youtube_url` — for the blog feed page.
+
+    `date` is a DDB reserved word so we alias it via ExpressionAttributeNames.
+    """
+    if STUB_MODE:
+        log.info("STUB: list_digests() → []")
+        return []
+    resp = _ddb().Table(DIGESTS_TABLE).scan(
+        ProjectionExpression="#d, title, youtube_url",
+        ExpressionAttributeNames={"#d": "date"},
+        Limit=limit,
+    )
+    items = resp.get("Items", [])
+    items.sort(key=lambda x: x.get("date", ""), reverse=True)
+    return items
+
+
 # --- Session state -----------------------------------------------------------
 
 def get_session(session_id: str) -> dict | None:

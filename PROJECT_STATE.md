@@ -1,6 +1,6 @@
 # Project state — Roulette-Kaki
 
-Last updated: 2026-08-30 (Phase 4 complete — research agent + chat endpoint live)
+Last updated: 2026-08-30 (Phase 5 complete — frontend scaffolded, ready for local demo)
 
 Single source of truth for what's built, what's next, and what's blocked.
 
@@ -10,7 +10,7 @@ Single source of truth for what's built, what's next, and what's blocked.
 
 | Feature | Status | Notes |
 |---|---|---|
-| BlogPost — Parliament Debate Digest | **Phase 4 complete — chat endpoint live.** `POST /debates/{date}/chat` wires the research agent: session-state DDB row (TTL 1h), lazy S3 report cache, Nova Pro Converse with document blocks at message 0 for stable prompt caching. Frontend (Phase 5) is next. | See `ARCHITECTURE.md`, `AGENTS.md`, `scripts/README.md`. |
+| BlogPost — Parliament Debate Digest | **Phase 5 complete — full local demo works.** Vite + React + TS + Tailwind frontend under `BlogPost/frontend/`. Feed page lists cached digests from DDB (`GET /debates` now scans real). Detail page shows digest + video + topics + chat sidebar. Chat has topic combobox, markdown-rendered replies, localStorage session persistence. Phase 6 (Lambda + S3/CloudFront deploy) is next. | See `ARCHITECTURE.md`, `AGENTS.md`, `scripts/README.md`, `BlogPost/frontend/`. |
 | Chatbot                              | Not started — stub directories only  | `Chatbot/backend`, `Chatbot/frontend` exist but are empty. |
 | Translation                          | Not started — empty stub file        | `Translation/main.py` is empty. |
 
@@ -78,8 +78,14 @@ Phase 4 (research agent) are next.
       first turn, follow-up cache-stable prefix, no-topic guardrail
       (no Bedrock call), fabricated topic_id, 5-topic cap, grounded
       marker parse+strip, missing-digest ValueError.
-- [ ] **Phase 5 — Frontend.** Vite + React scaffold, blog feed, detail page
-      with chat + topic dropdown.
+- [x] **Phase 5 — Frontend.** Vite + React + TypeScript + Tailwind scaffold
+      under `BlogPost/frontend/`. Two pages (feed + detail), 6 components
+      (DebateCard, DigestSummary, InterestingTopics, TopicList,
+      TopicSelector, ChatPanel), plain-fetch API client, localStorage
+      session persistence keyed by date, `react-markdown` for chat replies.
+      Backend delta: `services/storage.py::list_digests()` (DDB Scan with
+      ProjectionExpression), `main.py::list_debates` now returns real
+      cached digests. Empty-state UI for a fresh DDB.
 - [ ] **Phase 6 — Package + deploy.** Dockerfile on Lambda Python base image,
       deploy to Lambda Function URL. Frontend to S3 + CloudFront.
 

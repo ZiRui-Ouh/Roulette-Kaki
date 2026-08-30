@@ -102,7 +102,7 @@ Interactive Swagger UI: **http://localhost:8000/docs**.
 |---|---|---|
 | `GET`  | `/`                          | Endpoint directory (self-describing) |
 | `GET`  | `/health`                    | `{"status": "ok", "phase": 3}` |
-| `GET`  | `/debates`                   | Stub list; Phase 5+ will scan DDB. |
+| `GET`  | `/debates`                   | **Live.** Scans DDB `DebateDigests` and returns `{"debates": [{date, title, youtube_url}, ...]}` sorted date-desc. `USE_LOCAL_STUBS=1` returns `{"debates": []}`. |
 | `GET`  | `/debates/{date}`            | **Live digest.** `date` = `YYYY-MM-DD` (e.g. `2026-08-05`). Runs digest agent on cache miss; returns HTTP 404 `{"detail":{"error":"no_sitting", ...}}` when no fixture / no sitting exists. |
 | `POST` | `/debates/{date}/chat`       | **Live.** Body: `{"message": "...", "session_id"?, "topic_id"?}`. Returns `{"session_id", "reply", "topics_used", "grounded"}`. HTTP 400 if the date has no digest yet (call `GET /debates/{date}` first). HTTP 503 in `SCRAPER_MODE=fixture` (fixtures don't have report bodies). |
 
@@ -172,17 +172,29 @@ default at runtime and Bedrock calls will 404 on the Singapore model IDs.
 
 ---
 
-## What's next — Phase 5 (frontend) or Phase 3.5c (pre-populate demo digests)
+## What's next — Phase 6 (packaging + deploy) or Phase 3.5c (pre-populate)
 
-Both work independently. Phase 5 is the last "build" phase before packaging.
-
-**Phase 5 — frontend.** Vite + React app hosted on S3 + CloudFront. Two
-views: blog feed (`GET /debates`) and detail-with-chat
-(`GET /debates/{date}` + `POST /debates/{date}/chat`). Chat UI should
-surface a topic dropdown so the user picks a `topic_id` to attach — the
-backend already accepts it.
+**Phase 6 — Lambda + S3/CloudFront deploy.** Containerize the backend
+(Dockerfile targeting `public.ecr.aws/lambda/python:3.11`, Mangum
+handler already in `lambda_handler.py`), deploy to Lambda with Function
+URL. `vite build` the frontend and push to S3 + CloudFront. Update
+Terraform module with the Lambda + CloudFront resources.
 
 **Phase 3.5c — pre-populate showcase digests.** One-time run of
 `scripts/prepopulate_digests.py` against 5-10 real sitting dates with
 `SCRAPER_MODE=sprs`. Warms DDB so demo day doesn't depend on live SPRS.
 Costs ~$0.01 total.
+
+## Running the frontend
+
+```bash
+cd BlogPost/frontend
+npm install
+cp .env.example .env      # edit if backend runs elsewhere
+npm run dev               # → http://localhost:5173
+```
+
+Backend must be running on http://localhost:8000 with real AWS creds and
+`SCRAPER_MODE=sprs` for chat to work. Feed page needs at least one
+cached digest in DDB — hit `GET /debates/{date}` for a real sitting
+date first, or run `scripts/prepopulate_digests.py`.

@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from agents import digest as digest_agent
 from agents import research as research_agent
+from services import storage
 
 log = logging.getLogger(__name__)
 
@@ -80,17 +81,9 @@ def health() -> dict:
 
 @app.get("/debates")
 def list_debates() -> dict:
-    # Phase 5+ will scan the DebateDigests DDB table. Stub list for now —
-    # populated once the real scraper (Phase 3.5) has digested a real range
-    # of dates.
-    stub = [
-        DebateSummary(
-            date="2026-08-05",
-            title="Sitting of 05 August 2026 (fixture)",
-            youtube_url="https://www.youtube.com/watch?v=fixture-sitting-20260805",
-        ),
-    ]
-    return {"debates": [d.model_dump() for d in stub], "phase": 3}
+    # Real DDB scan (Phase 5). Returns [] under USE_LOCAL_STUBS.
+    items = storage.list_digests()
+    return {"debates": [DebateSummary(**d).model_dump() for d in items]}
 
 
 @app.get("/debates/{date}")
