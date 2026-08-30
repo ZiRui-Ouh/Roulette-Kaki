@@ -22,10 +22,11 @@ from typing import Literal
 import boto3
 from botocore.config import Config
 
-REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
+# REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
+REGION = "us-east-1"
 
-MODEL_NOVA_LITE = "apac.amazon.nova-lite-v1:0"
-MODEL_NOVA_PRO = "apac.amazon.nova-pro-v1:0"
+MODEL_NOVA_LITE = "amazon.nova-lite-v1:0"
+MODEL_NOVA_PRO = "amazon.nova-pro-v1:0"
 
 MAX_TOPICS_PER_SESSION = 5
 MAX_DOC_TOKENS_PER_SESSION = 50_000

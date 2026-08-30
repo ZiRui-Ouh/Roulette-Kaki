@@ -4,6 +4,11 @@ Repo-level rules for future Claude sessions working in this feature. Read
 `../ARCHITECTURE.md`, `../AGENTS.md`, and `../PROJECT_STATE.md` for the
 full design; the rules below are the load-bearing bits you must not violate.
 
+**Current progress and per-file runbook live in
+[`backend/README.md`](backend/README.md) — read it before editing anything
+under `backend/`.** It's the source of truth for which phase is done, which
+files are still stubs, and what the next concrete step is.
+
 ## Hard budget rule
 
 **$30 total spend across the entire hackathon** — Bedrock, Lambda, S3,

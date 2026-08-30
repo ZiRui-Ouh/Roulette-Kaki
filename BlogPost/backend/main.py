@@ -1,24 +1,28 @@
 """FastAPI app for the Parliament Debate Digest.
 
-Phase 2 scaffolding: all three endpoints return stub data. No AWS calls
-are made from these handlers yet — the digest/research agents raise
-NotImplementedError, which the handlers catch and turn into stub
-responses so the frontend can start integrating.
+Phase 3: `/debates/{date}` is wired to the real digest agent — cache
+check, fixture-backed topic scrape, Nova Lite summarization, DDB write.
+`/debates/{date}/chat` still returns a stub reply; Phase 4 wires the
+research agent.
 
-Later phases will wire the agents in.
+The `NotImplementedError` catches are kept as defensive fallbacks so a
+partial regression during later phases doesn't 500 the demo.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from agents import digest as digest_agent
 from agents import research as research_agent
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(title="Parliament Debate Digest", version="0.2.0")
 
@@ -58,7 +62,7 @@ class ChatResponse(BaseModel):
 def root() -> dict:
     return {
         "name": "Parliament Debate Digest API",
-        "phase": 2,
+        "phase": 3,
         "endpoints": [
             "GET  /health",
             "GET  /debates",
@@ -71,38 +75,45 @@ def root() -> dict:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "phase": 2}
+    return {"status": "ok", "phase": 3}
 
 
 @app.get("/debates")
 def list_debates() -> dict:
-    # Phase 3+ will read from DynamoDB DebateDigests. Stub for now.
+    # Phase 5+ will scan the DebateDigests DDB table. Stub list for now —
+    # populated once the real scraper (Phase 3.5) has digested a real range
+    # of dates.
     stub = [
         DebateSummary(
             date="2026-08-05",
-            title="Sitting of 05 August 2026 (stub)",
-            youtube_url="https://www.youtube.com/watch?v=example",
+            title="Sitting of 05 August 2026 (fixture)",
+            youtube_url="https://www.youtube.com/watch?v=fixture-sitting-20260805",
         ),
     ]
-    return {"debates": [d.model_dump() for d in stub], "phase": 2}
+    return {"debates": [d.model_dump() for d in stub], "phase": 3}
 
 
 @app.get("/debates/{date}")
 def get_debate(date: str) -> dict:
     try:
-        return digest_agent.run_digest(date)
+        result = digest_agent.run_digest(date)
     except NotImplementedError:
+        # Defensive fallback so a partial regression can't 500 the demo.
+        log.warning("digest agent NotImplementedError for %s — returning stub", date)
         return {
             "date": date,
             "title": f"Sitting of {date} (stub)",
-            "youtube_url": "https://www.youtube.com/watch?v=example",
-            "summary": "Stub digest — Phase 3 will populate.",
+            "youtube_url": "",
+            "summary": "Stub digest — digest agent is not yet implemented.",
             "topic_count": 0,
             "category_breakdown": {},
             "interesting_topics": [],
             "topics": [],
-            "phase": 2,
+            "phase": 3,
         }
+    if result.get("error") == "no_sitting":
+        raise HTTPException(status_code=404, detail=result)
+    return result
 
 
 @app.post("/debates/{date}/chat", response_model=ChatResponse)

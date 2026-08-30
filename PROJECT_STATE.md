@@ -1,6 +1,6 @@
 # Project state — Roulette-Kaki
 
-Last updated: 2026-08-30 (Phase 2 complete)
+Last updated: 2026-08-30 (Phase 3 complete)
 
 Single source of truth for what's built, what's next, and what's blocked.
 
@@ -10,7 +10,7 @@ Single source of truth for what's built, what's next, and what's blocked.
 
 | Feature | Status | Notes |
 |---|---|---|
-| BlogPost — Parliament Debate Digest | **Phase 2 complete — backend skeleton in place, no AWS resources created yet** | See `ARCHITECTURE.md`, `AGENTS.md`. Budget-revised plan approved. |
+| BlogPost — Parliament Debate Digest | **Phase 3 complete — digest agent live (fixture-backed), Terraform module written** | See `ARCHITECTURE.md`, `AGENTS.md`. AWS resources land on `terraform apply`. |
 | Chatbot                              | Not started — stub directories only  | `Chatbot/backend`, `Chatbot/frontend` exist but are empty. |
 | Translation                          | Not started — empty stub file        | `Translation/main.py` is empty. |
 
@@ -18,7 +18,8 @@ Single source of truth for what's built, what's next, and what's blocked.
 
 ## BlogPost — implementation phases
 
-Each phase is demoable on its own. Phase 3 is next.
+Each phase is demoable on its own. Phase 3.5 (real SPRS scraper) and
+Phase 4 (research agent) are next.
 
 - [x] **Phase 0** — Original design captured in `Blog_Summary.txt` (kept for
       reference).
@@ -35,9 +36,21 @@ Each phase is demoable on its own. Phase 3 is next.
       Uvicorn smoke-test verified locally on 2026-08-30. **Full backend
       state, layout, runbook, and API surface lives in
       [`BlogPost/backend/README.md`](BlogPost/backend/README.md).**
-- [ ] **Phase 3 — Digest agent + SPRS scraper.** `scrape_debate_list`,
-      `summarize_and_stats`, S3 write of raw report bytes per topic, DDB
-      write of the digest. Test locally against real DDB + S3.
+- [x] **Phase 3 — Digest agent + Terraform infra (fixture-first).**
+      `services/scraper.py::list_topics` is fixture-backed (reads
+      `backend/fixtures/topics_{date}.json`). `agents/digest.py::run_digest`
+      is fully implemented: cache check → topic scrape → Nova Lite
+      summarize → JSON parse (drops fabricated `topic_id`s) → DDB write.
+      `services/storage.py` gains `USE_LOCAL_STUBS=1` short-circuit for
+      local dev without AWS creds. `main.py::get_debate` returns real
+      digests with an HTTP 404 for no-sitting dates. Terraform module at
+      `terraform/` defines `DebateDigests`, `ChatSessions` (TTL on `ttl`),
+      and `parl-debate-cache` bucket with public access blocked.
+- [ ] **Phase 3.5 — Real SPRS scraper.** Flip `SCRAPER_MODE=sprs`.
+      Recon on 2026-08-30 confirmed SPRS is an Angular SPA with no
+      discoverable REST endpoints — first pass will need Playwright
+      instrumented to capture the real API traffic, then decide whether
+      to fall back to `httpx`.
 - [ ] **Phase 4 — Research agent with document blocks.** Load
       `topics_loaded` documents from S3, attach as Converse `document`
       blocks with prompt-cache flags, call Nova Pro, parse `grounded`
@@ -66,32 +79,44 @@ Each phase is demoable on its own. Phase 3 is next.
 
 ## Running the backend locally
 
+Two modes. Full runbook and env-var reference live in
+[`BlogPost/backend/README.md`](BlogPost/backend/README.md).
+
+**Local, no AWS (fastest for iteration):**
+
 ```bash
 cd BlogPost/backend
 ../../.venv/bin/pip install -r requirements.txt
+export USE_LOCAL_STUBS=1 SCRAPER_MODE=fixture AWS_REGION=ap-southeast-1
 ../../.venv/bin/python -m uvicorn main:app --reload --port 8000
 ```
 
-Then:
-- `GET http://localhost:8000/health` → `{"status": "ok", "phase": 2}`
-- `GET http://localhost:8000/debates` → stub list of one debate
-- `GET http://localhost:8000/debates/2026-08-05` → stub digest
-- `POST http://localhost:8000/debates/2026-08-05/chat` with body
-  `{"message": "hi"}` → stub echo reply
+`GET /debates/2026-08-05` hits the fixture + Nova Lite for real (needs
+Bedrock access), but DDB/S3 are stubbed. ~$0.001 per digest.
 
-None of these hit AWS in Phase 2 — the agents raise `NotImplementedError`
-and the handlers return stub payloads.
+**End-to-end against real AWS:**
+
+```bash
+cd terraform && terraform init && terraform apply    # one-time
+cd ../BlogPost/backend
+export AWS_REGION=ap-southeast-1  # unset USE_LOCAL_STUBS
+../../.venv/bin/python -m uvicorn main:app --reload --port 8000
+```
+
+First `GET /debates/2026-08-05` scrapes fixture + summarizes + writes to
+DDB (~2s). Second call hits the DDB cache (~50ms).
 
 ---
 
 ## Open questions to resolve during implementation
 
-- Does SPRS expose a plain JSON API that returns per-topic report text? If
-  yes, Playwright is not needed. If no, add Playwright to the Lambda
-  container (image size roughly doubles but still fits).
+- ~~Does SPRS expose a plain JSON API?~~ **Answered 2026-08-30:** No
+  discoverable REST endpoints via URL guessing — SPA hides the API.
+  Phase 3.5 needs an instrumented Playwright run to capture the real
+  API traffic before we decide `httpx` vs. Playwright for production.
 - What format does SPRS serve reports in — PDF, HTML, both? Determines the
   file extension on the S3 cache key and whether we need any format
-  massaging before handing to Nova.
+  massaging before handing to Nova. Resolves during Phase 3.5.
 - Nova Pro's document-block behavior on very long PDFs (>50 pages) —
   confirm quality is acceptable before Phase 4 signoff, otherwise fall back
   to Nova Lite pre-summarization per topic.

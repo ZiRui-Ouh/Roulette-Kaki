@@ -9,10 +9,15 @@ Bucket:
 
 Clients are lazily initialized on first use; nothing hits AWS at import
 time.
+
+`USE_LOCAL_STUBS=1` short-circuits every operation so local dev works
+without AWS credentials — reads return None/empty, writes log and no-op.
+Leave unset in production / against real infra.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 
@@ -25,6 +30,10 @@ SESSIONS_TABLE = os.environ.get("SESSIONS_TABLE", "ChatSessions")
 CACHE_BUCKET = os.environ.get("CACHE_BUCKET", "parl-debate-cache")
 
 SESSION_TTL_SECONDS = 3600  # 1 hour, refreshed on every message.
+
+STUB_MODE = os.environ.get("USE_LOCAL_STUBS") == "1"
+
+log = logging.getLogger(__name__)
 
 _ddb_singleton = None
 _s3_singleton = None
@@ -47,17 +56,26 @@ def _s3():
 # --- Digest cache ------------------------------------------------------------
 
 def get_digest(date: str) -> dict | None:
+    if STUB_MODE:
+        log.info("STUB: get_digest(%s) → None (force miss)", date)
+        return None
     resp = _ddb().Table(DIGESTS_TABLE).get_item(Key={"date": date})
     return resp.get("Item")
 
 
 def put_digest(digest: dict) -> None:
+    if STUB_MODE:
+        log.info("STUB: put_digest(date=%s) — no-op", digest.get("date"))
+        return
     _ddb().Table(DIGESTS_TABLE).put_item(Item=digest)
 
 
 # --- Session state -----------------------------------------------------------
 
 def get_session(session_id: str) -> dict | None:
+    if STUB_MODE:
+        log.info("STUB: get_session(%s) → None", session_id)
+        return None
     resp = _ddb().Table(SESSIONS_TABLE).get_item(Key={"session_id": session_id})
     return resp.get("Item")
 
@@ -67,6 +85,10 @@ def put_session(session: dict) -> None:
     this — TTL is set here so it cannot be forgotten upstream.
     """
     session = {**session, "ttl": int(time.time()) + SESSION_TTL_SECONDS}
+    if STUB_MODE:
+        log.info("STUB: put_session(session_id=%s, ttl=%s) — no-op",
+                 session.get("session_id"), session["ttl"])
+        return
     _ddb().Table(SESSIONS_TABLE).put_item(Item=session)
 
 
@@ -77,6 +99,9 @@ def report_key(date: str, topic_id: str, ext: str) -> str:
 
 
 def get_report(date: str, topic_id: str, ext: str) -> bytes | None:
+    if STUB_MODE:
+        log.info("STUB: get_report(%s, %s) → None", date, topic_id)
+        return None
     try:
         resp = _s3().get_object(Bucket=CACHE_BUCKET, Key=report_key(date, topic_id, ext))
         return resp["Body"].read()
@@ -87,6 +112,10 @@ def get_report(date: str, topic_id: str, ext: str) -> bytes | None:
 
 
 def put_report(date: str, topic_id: str, ext: str, data: bytes) -> None:
+    if STUB_MODE:
+        log.info("STUB: put_report(%s, %s, %s bytes) — no-op",
+                 date, topic_id, len(data))
+        return
     _s3().put_object(
         Bucket=CACHE_BUCKET,
         Key=report_key(date, topic_id, ext),

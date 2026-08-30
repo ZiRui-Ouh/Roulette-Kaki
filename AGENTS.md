@@ -24,17 +24,23 @@ throughput, plenty of quality for summarization.
 
 **Tools:**
 
-- `scrape_debate_list(date: str) -> list[TopicMeta]`
-  - Try SPRS JSON API first via `httpx`.
-  - Fallback: Playwright in the same container.
-  - Returns topic titles, speakers, source URLs. Also writes the raw
-    report bytes for each topic to `s3://parl-debate-cache/{date}/{topic_id}.{ext}`.
+- `list_topics(date: str) -> list[TopicMeta]`  (in `services/scraper.py`)
+  - Phase 3: reads `backend/fixtures/topics_{date}.json`. Returns `[]` if
+    no sitting.
+  - Phase 3.5: swaps in real SPRS. Recon on 2026-08-30 showed SPRS is an
+    Angular SPA with no discoverable REST endpoints — first pass will use
+    Playwright instrumented with `page.on("request")` to capture the real
+    API traffic, then decide whether to fall back to `httpx`.
+  - Returns topic titles, speakers, source URLs, and format hint.
+  - **Does NOT fetch report bodies.** Report PDFs/HTML are scraped
+    lazily by the research agent (see below), keyed by the same
+    `topic_id` for the S3 cache.
 
-- `summarize_and_stats(topics: list[TopicMeta]) -> DigestPayload`
-  - Single Nova Lite call.
-  - Returns `{ summary, topic_count, category_breakdown, interesting_topics }`.
-  - Grounded strictly in the scraped topic titles + speakers — must not
-    invent topics that weren't in the input.
+- `bedrock.summarize(prompt)`  (in `services/bedrock.py`)
+  - Single Nova Lite call over topic titles + speakers.
+  - Returns `{ summary, category_breakdown, interesting_topics }` inside
+    a `<json>...</json>` block. Server-side wraps the response with
+    `topic_count = len(topics)` and strips hallucinated `topic_id`s.
 
 **Output written to** DynamoDB `DebateDigests` (PK `date`).
 
@@ -45,7 +51,8 @@ throughput, plenty of quality for summarization.
 - If the date had no sitting, return `{ error: "no_sitting" }` and do not
   write a digest row.
 - The `interesting_topics` field must reference `topic_id` values that
-  actually appear in `topics` — no fabrication.
+  actually appear in `topics`. `agents/digest.py::_parse_digest_json`
+  enforces this by filtering — fabricated IDs are dropped and logged.
 
 ### 2. Research agent
 
@@ -63,8 +70,12 @@ inadequate on Nova Lite for interactive Q&A.
 2. If the current message has a `topic_id` field and it isn't already in
    `topics_loaded`, append it (subject to the caps below).
 3. For each topic in `topics_loaded`, fetch its cached report bytes from
-   S3. If a topic isn't in S3 yet, delegate to the digest agent's
-   `scrape_debate_list` for that specific topic before proceeding.
+   S3 via `storage.get_report(date, topic_id, ext)`. On miss, call
+   `scraper.fetch_report(topic)` to pull the report from SPRS, then
+   `storage.put_report(...)` to cache it under `{date}/{topic_id}.{ext}`
+   before proceeding. This is the **lazy-scrape** step — reports are
+   fetched only when the user actually asks about the topic, not
+   proactively at digest time.
 4. Call Bedrock Converse with:
    - `system` — grounding prompt (see below).
    - `messages` — prior `chat_history` + current user message.

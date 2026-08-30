@@ -66,7 +66,9 @@ cosine retrieve. We are not doing that. Nova's Converse API accepts
 `document` content blocks (PDF / HTML / DOCX / MD / TXT) natively, with a
 300K-token context window. So the research agent works by:
 
-1. Caching the raw report bytes in S3 keyed `{date}/{topic_id}.{ext}`.
+1. Caching the raw report bytes in S3 keyed `{date}/{topic_id}.{ext}` —
+   populated **lazily** by the research agent on first mention of a
+   topic (not proactively at digest time).
 2. On each chat turn, attaching the documents the session has "loaded" as
    `document` blocks in the Converse call.
 3. Enabling Bedrock prompt caching on those blocks so turns 2..N in the same

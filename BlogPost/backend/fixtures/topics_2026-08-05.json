@@ -1,0 +1,64 @@
+[
+  {
+    "topic_id": "T1-motion-cost-of-living",
+    "title": "Motion on cost of living support measures",
+    "speakers": [
+      "Minister for Finance",
+      "Leader of the Opposition",
+      "Member for Aljunied GRC"
+    ],
+    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T1-20260805",
+    "format": "pdf"
+  },
+  {
+    "topic_id": "T2-question-public-transport",
+    "title": "Oral question on public transport reliability after MRT breakdowns",
+    "speakers": [
+      "Minister for Transport",
+      "Member for Sengkang GRC"
+    ],
+    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T2-20260805",
+    "format": "pdf"
+  },
+  {
+    "topic_id": "T3-bill-pdpa-amendment",
+    "title": "Personal Data Protection (Amendment) Bill — Second Reading",
+    "speakers": [
+      "Minister for Digital Development and Information",
+      "Member for Bukit Panjang SMC",
+      "Member for Jurong GRC"
+    ],
+    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T3-20260805",
+    "format": "pdf"
+  },
+  {
+    "topic_id": "T4-question-bto-wait-times",
+    "title": "Question on BTO wait times and housing affordability for young couples",
+    "speakers": [
+      "Minister for National Development",
+      "Member for Marine Parade GRC"
+    ],
+    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T4-20260805",
+    "format": "pdf"
+  },
+  {
+    "topic_id": "T5-adjournment-climate-resilience",
+    "title": "Adjournment motion on national climate resilience and coastal protection",
+    "speakers": [
+      "Minister for Sustainability and the Environment",
+      "Member for West Coast GRC"
+    ],
+    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T5-20260805",
+    "format": "pdf"
+  },
+  {
+    "topic_id": "T6-question-healthcare-workforce",
+    "title": "Oral question on healthcare workforce shortages in public hospitals",
+    "speakers": [
+      "Minister for Health",
+      "Member for Nee Soon GRC"
+    ],
+    "source_url": "https://sprs.parl.gov.sg/search/#/topic?reportid=fixture-T6-20260805",
+    "format": "pdf"
+  }
+]
