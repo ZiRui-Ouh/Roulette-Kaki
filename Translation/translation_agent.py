@@ -17,7 +17,7 @@ class TranslationAgent:
             "text": (
                 f"You are an expert, highly accurate translation agent. "
                 f"Translate the user's text from {self.source_language} to {self.target_language}. "
-                f"CRITICAL RULE: Output ONLY the final translated string. Do not include quotes, introductory text, conversational filler, or explanations."
+                f"CRITICAL RULE: Output ONLY the final translated string. Do not include quotes, ntroductory text, conversational filler, or explanations."
             )
         }]
 
@@ -52,13 +52,36 @@ class TranslationAgent:
 # ==========================================
 # Example Usage
 # ==========================================
-if __name__ == "__main__":
+
+def Chinese_translate(input_string):
     Chinese_agent = TranslationAgent(target_language="Chinese")
     
-    input_string = "I like to eat ice cream"
+    input_string = input_string
     
-    # The agent accepts a string, and returns a string
     output_string = Chinese_agent.translate(input_string)
-    
+
     print(output_string)
+
+def Malay_translate(input_string):
+    Malay_agent = TranslationAgent(target_language="Malay")
     
+    input_string = input_string
+    
+    output_string = Malay_agent.translate(input_string)
+
+    print(output_string)
+
+def Tamil_translate(input_string):
+    Tamil_agent = TranslationAgent(target_language="Tamil")
+    
+    input_string = input_string
+    
+    output_string = Tamil_agent.translate(input_string)
+
+    print(output_string)
+
+target_text = "I like to eat chicken"
+
+Chinese_translate(target_text)
+Malay_translate(target_text)
+Tamil_translate(target_text)
