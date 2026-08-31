@@ -1,53 +1,65 @@
-# Use the Conversation API to send a text message to Amazon Nova.
-
 import boto3
-from botocore.exceptions import ClientError
 
-# Create a Bedrock Runtime client in the AWS Region you want to use.
-client = boto3.client("bedrock-runtime", region_name="us-east-1")
-
-# Set the model ID, e.g., Amazon Nova Lite.
-model_id = "us.amazon.nova-2-lite-v1:0"
-
-# Select language
-to_translate = input("Please input the text you want to translate: ")
-languages = {"Chinese", "Malay", "Tamil"}
-
-def select_by_name(options_set):
-    while True:
-        print(f"\nAvailable options: {', '.join(options_set)}")
-        choice = input("Type your choice: ").strip()
+class TranslationAgent:
+    def __init__(self, target_language: str, source_language: str = "auto", region_name: str = "us-east-1"):
+        """
+        Initializes the Translation Agent.
+        """
+        self.target_language = target_language
+        self.source_language = source_language
+        self.model_id = "us.amazon.nova-2-lite-v1:0" 
         
-        if choice in options_set:
-            return choice
+        # Initialize the AWS Bedrock runtime client
+        self.bedrock_client = boto3.client('bedrock-runtime', region_name=region_name)
+        
+        # 1. Define strict system instructions to enforce exact output constraints
+        self.system_prompts = [{
+            "text": (
+                f"You are an expert, highly accurate translation agent. "
+                f"Translate the user's text from {self.source_language} to {self.target_language}. "
+                f"CRITICAL RULE: Output ONLY the final translated string. Do not include quotes, "
+                f"introductory text, conversational filler, or explanations."
+            )
+        }]
+
+    def translate(self, text: str) -> str:
+        """
+        Core agent function: Accepts strictly a string input, returns strictly a string output.
+        """
+        if not isinstance(text, str):
+            raise ValueError("Input must be a string.")
             
-        print("That item is not in the set. Please try again.")
+        # 2. Format the user's input into the Converse API message structure
+        messages = [{
+            "role": "user",
+            "content": [{"text": text}]
+        }]
+        
+        try:
+            # 3. Call the Bedrock Converse API
+            response = self.bedrock_client.converse(
+                modelId=self.model_id,
+                system=self.system_prompts,
+                messages=messages,
+                inferenceConfig={"maxTokens": 512, "temperature": 0.1, "topP": 0.9} # Keep temperature low for accurate translation
+            )
+            
+            # 4. Extract and return purely the translated string
+            return response["output"]["message"]["content"][0]["text"].strip()
+            
+        except Exception as e:
+            raise RuntimeError(f"Translation failed: {str(e)}")
 
-target_language = select_by_name(languages)
-prompt = f"You are a helpful translator. Translate the sentence after ':' directly into {target_language} without any extra conversational filler: {to_translate}"
-
-print(prompt)
-# Start a conversation with the user message.
-conversation = [
-    {
-        "role": "user",
-        "content": [{"text": prompt}],
-    }
-]
-try:
-    # Send the message to the model, using a basic inference configuration.
-    response = client.converse(
-        modelId=model_id,
-        messages=conversation,
-        inferenceConfig={"maxTokens": 512, "temperature": 0.5, "topP": 0.9},
-    )
-
-    # Extract and print the response text.
-    response_text = response["output"]["message"]["content"][0]["text"]
-    print(response_text)
-
-except (ClientError, Exception) as e:
-    print(f"ERROR: Can't invoke '{model_id}'. Reason: {e}")
-    exit(1)
-
-
+# ==========================================
+# Example Usage
+# ==========================================
+if __name__ == "__main__":
+    Chinese_agent = TranslationAgent(target_language="Chinese")
+    
+    input_string = "I like to eat ice cream"
+    
+    # The agent accepts a string, and returns a string
+    output_string = Chinese_agent.translate(input_string)
+    
+    print(output_string)
+    
