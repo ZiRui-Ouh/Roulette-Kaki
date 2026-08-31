@@ -50,7 +50,7 @@ class TranslationAgent:
             raise RuntimeError(f"Translation failed: {str(e)}")
 
 # ==========================================
-# Example Usage
+# Defining different language translation agents
 # ==========================================
 
 def Chinese_translate(input_string):
@@ -80,6 +80,9 @@ def Tamil_translate(input_string):
 
     print(output_string)
 
+# ==========================================
+# Example 
+# ==========================================
 target_text = "I like to eat chicken"
 
 Chinese_translate(target_text)
