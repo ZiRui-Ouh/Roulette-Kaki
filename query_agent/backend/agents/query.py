@@ -1,12 +1,4 @@
-"""
-Query Agent.
 
-The Query Agent takes a user's policy question and
-answers it using official policy information.
-
-The Search Agent will eventually provide additional
-information to this agent.
-""" 
 
 from __future__ import annotations
 
