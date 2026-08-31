@@ -17,8 +17,7 @@ class TranslationAgent:
             "text": (
                 f"You are an expert, highly accurate translation agent. "
                 f"Translate the user's text from {self.source_language} to {self.target_language}. "
-                f"CRITICAL RULE: Output ONLY the final translated string. Do not include quotes, "
-                f"introductory text, conversational filler, or explanations."
+                f"CRITICAL RULE: Output ONLY the final translated string. Do not include quotes, introductory text, conversational filler, or explanations."
             )
         }]
 
