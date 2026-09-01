@@ -12,9 +12,8 @@ import boto3
 from botocore.config import Config
 
 
-REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
-MODEL_ID = "amazon.nova-lite-v1:0"
-
+REGION = "us-east-1"
+MODEL_ID = "us.amazon.nova-lite-v1:0"
 _client = None
 
 
