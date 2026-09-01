@@ -4,6 +4,15 @@ export interface DebateSummary {
   youtube_url: string;
 }
 
+// Same shape as DebateSummary. Distinct type name documents the origin:
+// Sitting is discovered from YouTube RSS (may not yet have a digest),
+// while DebateSummary comes from DDB (has a cached digest).
+export interface Sitting {
+  date: string;
+  title: string;
+  youtube_url: string;
+}
+
 export interface Topic {
   topic_id: string;
   title: string;

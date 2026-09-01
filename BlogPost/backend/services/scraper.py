@@ -35,6 +35,11 @@ class TopicMeta:
     speakers: list[str]
     source_url: str
     format: ReportFormat
+    # SPRS report type slug ("oral-answer", "written-answer-na", "bill",
+    # "motion", etc.). Populated by scraper_sprs; empty for fixtures.
+    # Used by the digest agent to compute category_breakdown server-side
+    # (Nova Lite can't count reliably at scale).
+    report_type: str = ""
 
 
 def list_topics(date: str) -> list[TopicMeta]:

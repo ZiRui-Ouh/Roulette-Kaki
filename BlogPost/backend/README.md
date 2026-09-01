@@ -44,7 +44,8 @@ backend/
 │   ├── bedrock.py          Nova Converse wrapper + session caps + cachePoint
 │   ├── storage.py          DDB + S3 lazy wrappers + TTL + USE_LOCAL_STUBS
 │   ├── scraper.py          SCRAPER_MODE dispatch (fixture / sprs)
-│   └── scraper_sprs.py     Real SPRS httpx client (Phase 3.5b, LIVE)
+│   ├── scraper_sprs.py     Real SPRS httpx client (Phase 3.5b, LIVE)
+│   └── sittings.py         YouTube playlist RSS → sitting feed (Phase 5.1)
 └── agents/
     ├── digest.py           Digest agent (LIVE, fixture + sprs)
     └── research.py         Research agent (LIVE, docs at message 0)
@@ -102,7 +103,8 @@ Interactive Swagger UI: **http://localhost:8000/docs**.
 |---|---|---|
 | `GET`  | `/`                          | Endpoint directory (self-describing) |
 | `GET`  | `/health`                    | `{"status": "ok", "phase": 3}` |
-| `GET`  | `/debates`                   | **Live.** Scans DDB `DebateDigests` and returns `{"debates": [{date, title, youtube_url}, ...]}` sorted date-desc. `USE_LOCAL_STUBS=1` returns `{"debates": []}`. |
+| `GET`  | `/debates`                   | **Live** (diagnostic). Scans DDB `DebateDigests` and returns `{"debates": [{date, title, youtube_url}, ...]}`. Frontend feed uses `/sittings` instead; this endpoint is for "what's already digested?" lookups. |
+| `GET`  | `/sittings?limit=5&offset=0` | **Live** (Phase 5.1). Fetches the configured YouTube playlist's Atom feed, dedupes multi-language versions per date (English preferred), returns `{"sittings": [...], "total": N, "has_more": bool}`. HTTP 503 if `YOUTUBE_PLAYLIST` unset; 400 on bad pagination params. |
 | `GET`  | `/debates/{date}`            | **Live digest.** `date` = `YYYY-MM-DD` (e.g. `2026-08-05`). Runs digest agent on cache miss; returns HTTP 404 `{"detail":{"error":"no_sitting", ...}}` when no fixture / no sitting exists. |
 | `POST` | `/debates/{date}/chat`       | **Live.** Body: `{"message": "...", "session_id"?, "topic_id"?}`. Returns `{"session_id", "reply", "topics_used", "grounded"}`. HTTP 400 if the date has no digest yet (call `GET /debates/{date}` first). HTTP 503 in `SCRAPER_MODE=fixture` (fixtures don't have report bodies). |
 
@@ -164,6 +166,8 @@ These live in `services/*.py` so higher layers can't bypass them:
 | `CACHE_BUCKET` | `parl-debate-cache` | S3 bucket for raw report bytes. |
 | `SCRAPER_MODE` | `fixture` | `fixture` reads `backend/fixtures/topics_{date}.json`. `sprs` uses the real SPRS API (see `services/scraper_sprs.py`). |
 | `SPRS_REQUEST_DELAY` | `0.5` | Minimum seconds between SPRS calls (throttle). Only matters when `SCRAPER_MODE=sprs`. |
+| `YOUTUBE_PLAYLIST` | *unset* | Playlist ID (`PL…`) or full URL. Required for `GET /sittings` to work. |
+| `SITTINGS_CACHE_TTL_SECONDS` | `600` | TTL for the in-process cache of the playlist RSS fetch. |
 | `USE_LOCAL_STUBS` | *unset* | Set to `1` to short-circuit DDB + S3 (they log and no-op). Bedrock still runs. Use for iterating without AWS resources. |
 
 Note: if your shell has `AWS_REGION=us-east-1` set, that overrides the

@@ -1,6 +1,6 @@
 # Project state — Roulette-Kaki
 
-Last updated: 2026-08-30 (Phase 5 complete — frontend scaffolded, ready for local demo)
+Last updated: 2026-08-31 (Phase 5.1 complete — feed auto-discovers sittings from YouTube playlist)
 
 Single source of truth for what's built, what's next, and what's blocked.
 
@@ -10,7 +10,7 @@ Single source of truth for what's built, what's next, and what's blocked.
 
 | Feature | Status | Notes |
 |---|---|---|
-| BlogPost — Parliament Debate Digest | **Phase 5 complete — full local demo works.** Vite + React + TS + Tailwind frontend under `BlogPost/frontend/`. Feed page lists cached digests from DDB (`GET /debates` now scans real). Detail page shows digest + video + topics + chat sidebar. Chat has topic combobox, markdown-rendered replies, localStorage session persistence. Phase 6 (Lambda + S3/CloudFront deploy) is next. | See `ARCHITECTURE.md`, `AGENTS.md`, `scripts/README.md`, `BlogPost/frontend/`. |
+| BlogPost — Parliament Debate Digest | **Phase 5.1 complete — feed now discovers sittings automatically.** New `services/sittings.py` reads a YouTube playlist Atom feed (`YOUTUBE_PLAYLIST` env var), dedupes multi-language versions per date (English preferred, unicodedata-based heuristic). New `GET /sittings?limit=&offset=` endpoint. Frontend feed uses it with a "Load more" button. RSS caps at 15 items ≈ 3-4 unique sittings; API v3 upgrade deferred to 5.2. Phase 6 (Lambda + S3/CloudFront deploy) is next. | See `ARCHITECTURE.md`, `AGENTS.md`, `scripts/README.md`, `BlogPost/frontend/`. |
 | Chatbot                              | Not started — stub directories only  | `Chatbot/backend`, `Chatbot/frontend` exist but are empty. |
 | Translation                          | Not started — empty stub file        | `Translation/main.py` is empty. |
 
@@ -79,13 +79,22 @@ Phase 4 (research agent) are next.
       (no Bedrock call), fabricated topic_id, 5-topic cap, grounded
       marker parse+strip, missing-digest ValueError.
 - [x] **Phase 5 — Frontend.** Vite + React + TypeScript + Tailwind scaffold
-      under `BlogPost/frontend/`. Two pages (feed + detail), 6 components
-      (DebateCard, DigestSummary, InterestingTopics, TopicList,
-      TopicSelector, ChatPanel), plain-fetch API client, localStorage
-      session persistence keyed by date, `react-markdown` for chat replies.
-      Backend delta: `services/storage.py::list_digests()` (DDB Scan with
-      ProjectionExpression), `main.py::list_debates` now returns real
-      cached digests. Empty-state UI for a fresh DDB.
+      under `BlogPost/frontend/`. Two pages (feed + detail), 6 components,
+      plain-fetch API client, localStorage session persistence keyed by
+      date, `react-markdown` for chat replies. Backend added
+      `storage.list_digests()` (DDB Scan).
+- [x] **Phase 5.1 — YouTube-driven feed.** New `services/sittings.py`
+      fetches a playlist Atom feed
+      (`https://www.youtube.com/feeds/videos.xml?playlist_id=<ID>`),
+      dedupes multi-language versions per date (English preferred via
+      `unicodedata` Latin-alphabet check), TTL-cached 10 min. New
+      `GET /sittings?limit=5&offset=0` endpoint (with 400 on bad
+      pagination, 503 when `YOUTUBE_PLAYLIST` env var is unset).
+      Frontend feed page swapped from `GET /debates` to `GET /sittings`,
+      with a "Load more" button and a "set the env var" empty state.
+      Trade-off documented: RSS caps at ~15 items ≈ 3-4 unique sittings
+      after dedup. Phase 5.2 can swap in YouTube Data API v3 for full
+      pagination without changing the interface.
 - [ ] **Phase 6 — Package + deploy.** Dockerfile on Lambda Python base image,
       deploy to Lambda Function URL. Frontend to S3 + CloudFront.
 

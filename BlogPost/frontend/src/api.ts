@@ -3,6 +3,7 @@ import type {
   ChatResponse,
   DebateSummary,
   Digest,
+  Sitting,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -35,6 +36,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function listDebates(): Promise<{ debates: DebateSummary[] }> {
   return request("/debates");
+}
+
+export function listSittings(
+  limit = 5,
+  offset = 0,
+): Promise<{ sittings: Sitting[]; total: number; has_more: boolean }> {
+  const qs = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return request(`/sittings?${qs}`);
 }
 
 export function getDigest(date: string): Promise<Digest> {

@@ -193,6 +193,11 @@ def _normalize_topic(raw: dict, date: str) -> dict:  # noqa: ARG001 — date res
     single topic — it reads `reportid` from URL params on fresh load
     (unlike the post-navigation URL seen in the recon capture, which
     dropped the query because state was already in memory).
+
+    `report_type` echoes SPRS's `reportType` slug (`"oral-answer"`,
+    `"written-answer-na"`, `"bill"`, `"motion"`, ...). The digest agent
+    uses this to compute `category_breakdown` server-side (Nova Lite
+    counts unreliably at 100+ topics).
     """
     report_id = (raw.get("reportId") or "").rstrip("#")
     return {
@@ -201,6 +206,7 @@ def _normalize_topic(raw: dict, date: str) -> dict:  # noqa: ARG001 — date res
         "speakers": [],
         "source_url": f"https://sprs.parl.gov.sg/search/#/sprs3topic?reportid={report_id}",
         "format": "html",
+        "report_type": (raw.get("reportType") or "").strip(),
     }
 
 

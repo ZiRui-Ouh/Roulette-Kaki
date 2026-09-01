@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from agents import digest as digest_agent
 from agents import research as research_agent
-from services import storage
+from services import sittings, storage
 
 log = logging.getLogger(__name__)
 
@@ -82,14 +82,38 @@ def health() -> dict:
 @app.get("/debates")
 def list_debates() -> dict:
     # Real DDB scan (Phase 5). Returns [] under USE_LOCAL_STUBS.
+    # Kept as a diagnostic endpoint for "already-cached digests"; the
+    # frontend feed uses /sittings (Phase 5.1) instead.
     items = storage.list_digests()
     return {"debates": [DebateSummary(**d).model_dump() for d in items]}
 
 
-@app.get("/debates/{date}")
-def get_debate(date: str) -> dict:
+@app.get("/sittings")
+def get_sittings(limit: int = 5, offset: int = 0) -> dict:
+    if limit < 1 or limit > 25 or offset < 0 or offset > 100:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "bad_pagination",
+                "message": "limit must be 1..25, offset must be 0..100",
+            },
+        )
     try:
-        result = digest_agent.run_digest(date)
+        return sittings.list_sittings(limit=limit, offset=offset)
+    except sittings.SittingsUnavailableError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "sittings_unavailable",
+                "message": str(e),
+            },
+        )
+
+
+@app.get("/debates/{date}")
+def get_debate(date: str, refresh: bool = False) -> dict:
+    try:
+        result = digest_agent.run_digest(date, refresh=refresh)
     except NotImplementedError:
         # Defensive fallback so a partial regression can't 500 the demo.
         log.warning("digest agent NotImplementedError for %s — returning stub", date)
