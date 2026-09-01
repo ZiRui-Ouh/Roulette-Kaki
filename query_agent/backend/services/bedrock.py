@@ -8,28 +8,32 @@ from __future__ import annotations
 
 import os
 
-import boto3
-from botocore.config import Config
+try:
+    import boto3
+    from botocore.config import Config
+except ImportError:  # pragma: no cover
+    boto3 = None
+    Config = None
 
 
-REGION = "us-east-1"
-MODEL_ID = "us.amazon.nova-lite-v1:0"
+REGION = os.environ.get("BEDROCK_REGION", os.environ.get("AWS_REGION", "us-east-1"))
+MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
 _client = None
 
 
 def get_client():
     """
     Create the Bedrock Runtime client.
-
-    Locally, AWS_PROFILE can be set to the hackathon
-    profile. In AWS deployment, boto3 can use the
-    environment/IAM role automatically.
     """
+    if boto3 is None or Config is None:
+        raise RuntimeError(
+            "The AWS SDK dependencies are not installed. "
+            "Install the backend requirements before calling the Bedrock API."
+        )
 
     global _client
 
     if _client is None:
-
         profile = os.environ.get("AWS_PROFILE")
 
         if profile:
@@ -43,7 +47,7 @@ def get_client():
             config=Config(
                 retries={
                     "max_attempts": 3,
-                    "mode": "standard"
+                    "mode": "standard",
                 }
             ),
         )
@@ -55,7 +59,6 @@ def ask_nova(prompt: str, max_tokens: int = 2048) -> str:
     """
     Send a prompt to Amazon Nova Lite and return its answer.
     """
-
     response = get_client().converse(
         modelId=MODEL_ID,
         messages=[

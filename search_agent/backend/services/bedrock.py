@@ -16,8 +16,8 @@ except ImportError:  # pragma: no cover - dependency is optional for tests
     Config = None
 
 
-REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
-MODEL_ID = "amazon.nova-lite-v1:0"
+REGION = os.environ.get("BEDROCK_REGION", os.environ.get("AWS_REGION", "us-east-1"))
+MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
 
 _client = None
 
@@ -26,7 +26,6 @@ def get_client():
     """
     Create the Bedrock Runtime client.
     """
-
     if boto3 is None or Config is None:
         raise RuntimeError(
             "The AWS SDK dependencies are not installed. "
@@ -56,7 +55,6 @@ def ask_nova(prompt: str, max_tokens: int = 2048) -> str:
     """
     Send a prompt to Amazon Nova Lite and return the answer.
     """
-
     response = get_client().converse(
         modelId=MODEL_ID,
         messages=[

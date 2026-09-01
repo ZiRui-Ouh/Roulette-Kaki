@@ -4,7 +4,10 @@ from pydantic import BaseModel
 
 from agents.query import answer_question
 
-app = FastAPI()
+app = FastAPI(
+    title="Policy Query Agent Backend",
+    description="Backend API for Singapore Policy Query Agent with integrated Search Agent intelligence.",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,18 +30,22 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     question: str
+    urls: list[str] | None = None
 
 
 @app.get("/")
 def home():
-    return {"message": "Query Agent backend is running!"}
+    return {
+        "message": "Query Agent backend is running!",
+        "search_agent_integrated": True,
+    }
 
 
 @app.post("/query")
 def query(q: QueryRequest):
     answer = answer_question(
         question=q.question,
-        official_sources=[]
+        urls=q.urls,
     )
 
     return {"answer": answer}

@@ -134,6 +134,32 @@ Rules:
   the user didn't pick a topic), return a helpful reply asking them to
   pick one — do not answer from general knowledge.
 
+## QueryAgent & SearchAgent — Singapore Policy Intelligence
+
+Two cooperating agents providing accurate, up-to-date policy information and public sentiment insights.
+
+### 1. Policy Query Agent (`query_agent`)
+The user-facing orchestrator that handles incoming user questions from the frontend.
+
+**Model:** Amazon Nova Lite (`apac.amazon.nova-lite-v1:0`).
+
+**Responsibilities:**
+- Receives policy questions via `POST /query`.
+- Coordinates with the Search Agent to retrieve fresh, scraped data from both official and unofficial sources.
+- Analyzes and filters retrieved content, placing strict priority on official government sources for rules, eligibility, figures, and deadlines.
+- Formulates a direct, concise response (1-2 sentence core answer + 2-4 key bullet points + official source citations).
+
+### 2. Search Agent (`search_agent`)
+The data retrieval and live web intelligence agent.
+
+**Model:** Amazon Nova Lite (`apac.amazon.nova-lite-v1:0`).
+
+**Responsibilities:**
+- Web scraping across **official government sources** (`.gov.sg`, `cpf.gov.sg`, `hdb.gov.sg`, `iras.gov.sg`, `mom.gov.sg`, `moh.gov.sg`, `sprs.parl.gov.sg`, etc.) and **unofficial sources** (Reddit Singapore, HardwareZone, public forums).
+- Categorizes scraped content into `official_sources` (`is_official=True`) and `unofficial_sources` (`is_official=False`).
+- Synthesizes findings into a structured search summary separating official policy facts from community sentiment.
+- Returns structured results to the Query Agent via `gather_and_search()`.
+
 ---
 
 ## Cross-agent rules (apply everywhere in the repo)
@@ -148,3 +174,4 @@ Rules:
   config live in one place.
 - **Log token usage** for every call (Bedrock's response includes it).
   Aggregate in CloudWatch so we can see cost drift.
+
