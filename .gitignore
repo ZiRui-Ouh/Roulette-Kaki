@@ -1,2 +1,8 @@
 .env
 .venv
+.claude
+*.md
+# Python
+__pycache__/
+*.py[cod]
+scripts
