@@ -60,7 +60,7 @@ def Chinese_translate(input_string):
     
     output_string = Chinese_agent.translate(input_string)
 
-    print(output_string)
+    
 
 def Malay_translate(input_string):
     Malay_agent = TranslationAgent(target_language="Malay")
@@ -69,7 +69,7 @@ def Malay_translate(input_string):
     
     output_string = Malay_agent.translate(input_string)
 
-    print(output_string)
+    
 
 def Tamil_translate(input_string):
     Tamil_agent = TranslationAgent(target_language="Tamil")
@@ -78,7 +78,7 @@ def Tamil_translate(input_string):
     
     output_string = Tamil_agent.translate(input_string)
 
-    print(output_string)
+    
 
 # ==========================================
 # Example 
