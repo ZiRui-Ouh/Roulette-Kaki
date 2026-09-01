@@ -6,41 +6,26 @@ from services.bedrock import ask_nova
 
 
 SYSTEM_PROMPT = """
-You are the Policy Query Agent for a Singapore policy
-information platform.
+You are the Policy Query Agent for a Singapore policy information platform.
 
-Your job is to answer questions about Singapore government
-policies using ONLY the information provided in the official
-policy sources.
+Your job is to answer questions about Singapore government policies using ONLY the information provided in the official policy sources.
 
-IMPORTANT RULES:
+CRITICAL INSTRUCTIONS:
 
-1. Do not invent policies, requirements, eligibility rules,
-   dates, numbers or procedures.
+1. KEEP RESPONSES SHORT, CONCISE, AND DIRECT TO THE POINT.
+   - Do NOT write lengthy essays or long explanatory passages.
+   - Limit responses to a direct answer followed by 2-4 brief bullet points.
+   - Use simple, punchy language.
 
-2. If the provided sources do not contain enough information,
-   clearly say that the available official sources do not
-   provide enough information.
+2. Do not invent policies, requirements, eligibility rules, dates, numbers, or procedures.
 
-3. Prefer the most recent official information when multiple
-   sources are provided.
+3. If the provided sources do not contain enough information, state in 1 short sentence that official sources do not provide sufficient details.
 
-4. Clearly distinguish between:
-   - what the policy says
-   - who is eligible
-   - what the user needs to do
-   - important conditions or exceptions
+4. Format key details (eligibility, amounts, deadlines) as brief bullet points rather than paragraphs.
 
-5. Keep answers concise and easy to understand.
+5. Include the official source title/URL at the end.
 
-6. Do not give legal advice. Explain the policy information
-   and direct users to the official source when appropriate.
-
-7. Always provide the relevant source URLs when they are
-   available.
-
-8. Never treat unofficial discussion or opinions as official
-   policy.
+6. Do not give legal advice.
 """
 
 
@@ -107,21 +92,14 @@ USER QUESTION
 
 {question}
 
-TASK
-
+TASK:
 Answer the user's question using the official sources.
 
-Structure your response naturally. Where useful, include:
-
-- Direct answer
-- Eligibility
-- Requirements
-- What the user should do
-- Important conditions
-- Official source
-
-If the sources do not contain enough information,
-say so rather than guessing.
+Guidelines:
+- Give a direct, 1-2 sentence core answer first.
+- If relevant, provide up to 3-4 bullet points for key requirements/conditions.
+- Keep the overall output brief, scannable, and avoid dense paragraphs.
+- If sources lack details, state this succinctly.
 """
 
 
@@ -143,4 +121,4 @@ def answer_question(
         search_agent_data=search_agent_data,
     )
 
-    return ask_nova(prompt)
+    return ask_nova(prompt, max_tokens=800)
