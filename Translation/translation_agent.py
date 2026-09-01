@@ -58,7 +58,9 @@ def Chinese_translate(input_string):
     
     input_string = input_string
     
-    output_string = Chinese_agent.translate(input_string)
+    return Chinese_agent.translate(input_string)
+
+    
 
     
 
@@ -67,7 +69,8 @@ def Malay_translate(input_string):
     
     input_string = input_string
     
-    output_string = Malay_agent.translate(input_string)
+    return Malay_agent.translate(input_string)
+
 
     
 
@@ -76,15 +79,8 @@ def Tamil_translate(input_string):
     
     input_string = input_string
     
-    output_string = Tamil_agent.translate(input_string)
+    return Tamil_agent.translate(input_string)
 
     
 
-# ==========================================
-# Example 
-# ==========================================
-target_text = "I like to eat chicken"
 
-Chinese_translate(target_text)
-Malay_translate(target_text)
-Tamil_translate(target_text)
