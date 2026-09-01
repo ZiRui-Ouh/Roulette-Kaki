@@ -55,9 +55,6 @@ class TranslationAgent:
 
 def Chinese_translate(input_string):
     Chinese_agent = TranslationAgent(target_language="Chinese")
-    
-    input_string = input_string
-    
     return Chinese_agent.translate(input_string)
 
     
@@ -65,10 +62,7 @@ def Chinese_translate(input_string):
     
 
 def Malay_translate(input_string):
-    Malay_agent = TranslationAgent(target_language="Malay")
-    
-    input_string = input_string
-    
+    Malay_agent = TranslationAgent(target_language="Malay")    
     return Malay_agent.translate(input_string)
 
 
@@ -76,9 +70,6 @@ def Malay_translate(input_string):
 
 def Tamil_translate(input_string):
     Tamil_agent = TranslationAgent(target_language="Tamil")
-    
-    input_string = input_string
-    
     return Tamil_agent.translate(input_string)
 
     
