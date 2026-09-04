@@ -53,19 +53,26 @@ def _s3():
     return _s3_singleton
 
 
+# In-memory stores for STUB_MODE
+_stub_digests: dict[str, dict] = {}
+_stub_sessions: dict[str, dict] = {}
+_stub_reports: dict[str, bytes] = {}
+
+
 # --- Digest cache ------------------------------------------------------------
 
 def get_digest(date: str) -> dict | None:
     if STUB_MODE:
-        log.info("STUB: get_digest(%s) → None (force miss)", date)
-        return None
+        return _stub_digests.get(date)
     resp = _ddb().Table(DIGESTS_TABLE).get_item(Key={"date": date})
     return resp.get("Item")
 
 
 def put_digest(digest: dict) -> None:
     if STUB_MODE:
-        log.info("STUB: put_digest(date=%s) — no-op", digest.get("date"))
+        date = digest.get("date")
+        if date:
+            _stub_digests[date] = digest
         return
     _ddb().Table(DIGESTS_TABLE).put_item(Item=digest)
 
@@ -77,8 +84,12 @@ def list_digests(limit: int = 50) -> list[dict]:
     `date` is a DDB reserved word so we alias it via ExpressionAttributeNames.
     """
     if STUB_MODE:
-        log.info("STUB: list_digests() → []")
-        return []
+        items = [
+            {"date": d.get("date"), "title": d.get("title"), "youtube_url": d.get("youtube_url")}
+            for d in _stub_digests.values()
+        ]
+        items.sort(key=lambda x: x.get("date", ""), reverse=True)
+        return items[:limit]
     resp = _ddb().Table(DIGESTS_TABLE).scan(
         ProjectionExpression="#d, title, youtube_url",
         ExpressionAttributeNames={"#d": "date"},
@@ -93,8 +104,7 @@ def list_digests(limit: int = 50) -> list[dict]:
 
 def get_session(session_id: str) -> dict | None:
     if STUB_MODE:
-        log.info("STUB: get_session(%s) → None", session_id)
-        return None
+        return _stub_sessions.get(session_id)
     resp = _ddb().Table(SESSIONS_TABLE).get_item(Key={"session_id": session_id})
     return resp.get("Item")
 
@@ -105,8 +115,9 @@ def put_session(session: dict) -> None:
     """
     session = {**session, "ttl": int(time.time()) + SESSION_TTL_SECONDS}
     if STUB_MODE:
-        log.info("STUB: put_session(session_id=%s, ttl=%s) — no-op",
-                 session.get("session_id"), session["ttl"])
+        session_id = session.get("session_id")
+        if session_id:
+            _stub_sessions[session_id] = session
         return
     _ddb().Table(SESSIONS_TABLE).put_item(Item=session)
 
@@ -119,8 +130,7 @@ def report_key(date: str, topic_id: str, ext: str) -> str:
 
 def get_report(date: str, topic_id: str, ext: str) -> bytes | None:
     if STUB_MODE:
-        log.info("STUB: get_report(%s, %s) → None", date, topic_id)
-        return None
+        return _stub_reports.get(report_key(date, topic_id, ext))
     try:
         resp = _s3().get_object(Bucket=CACHE_BUCKET, Key=report_key(date, topic_id, ext))
         return resp["Body"].read()
@@ -132,8 +142,7 @@ def get_report(date: str, topic_id: str, ext: str) -> bytes | None:
 
 def put_report(date: str, topic_id: str, ext: str, data: bytes) -> None:
     if STUB_MODE:
-        log.info("STUB: put_report(%s, %s, %s bytes) — no-op",
-                 date, topic_id, len(data))
+        _stub_reports[report_key(date, topic_id, ext)] = data
         return
     _s3().put_object(
         Bucket=CACHE_BUCKET,

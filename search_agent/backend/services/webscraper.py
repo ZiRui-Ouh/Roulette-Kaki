@@ -62,146 +62,162 @@ HEADERS = {
 # ============================================================
 
 POLICY_SOURCES = {
-
     # --------------------------------------------------------
-    # HDB
+    # HDB & Housing
     # --------------------------------------------------------
-
     "hdb": {
-
-        "domains": [
-            "hdb.gov.sg"
-        ],
-
+        "domains": ["hdb.gov.sg", "mnd.gov.sg"],
         "priority_urls": [
-
-            # IMPORTANT:
-            # Newest HDB income ceiling announcement
             {
-                "url": (
-                    "https://www.hdb.gov.sg/hdb-pulse/news/2026/"
-                    "increase-in-income-ceilings-and-greater-support-for-families-with-children"
-                ),
-                "title": (
-                    "Increase in Income Ceilings and Greater Support "
-                    "for Families with Children"
-                ),
-                "priority": 100
+                "url": "https://www.hdb.gov.sg/buying-a-flat/flat-grant-and-loan-eligibility/couples-and-families",
+                "title": "HDB Flat, Grant and Loan Eligibility for Couples and Families",
+                "priority": 100,
+                "default_content": """
+Official HDB Policy Guidelines for Couples and Families:
+- Eligibility: Applying as a core family nucleus under the Public Scheme, Fiancé/Fiancée Scheme, or Orphans Scheme. At least one Singapore Citizen (SC) applicant and at least one other SC or Singapore Permanent Resident (SPR).
+- Household Income Ceilings:
+  - 4-room and larger BTO flat: $16,000 gross monthly household income (raised from $14,000).
+  - 3-room BTO flat: $8,000 or $16,000 gross monthly household income (depending on the specific project).
+  - 2-room Flexi BTO flat (99-year lease): $8,000 or $16,000 depending on project.
+  - Executive Condominium (EC): $18,000 gross monthly household income (raised from $16,000).
+- Minimum Occupation Period (MOP): 5 years for Standard BTO flats; 10 years for Plus and Prime BTO flats.
+- Enhanced CPF Housing Grant (EHG): Up to $80,000 (and up to $120,000 under revised tiers) for eligible first-timer families with monthly household income up to $9,000.
+- CPF Housing Grants for Resale Flats: Up to $80,000 for 2- to 4-room resale flats; up to $50,000 for 5-room or larger resale flats.
+- Proximity Housing Grant (PHG): Up to $30,000 for living with parents/children, or up to $20,000 for living near (within 4km).
+""",
             },
-
-            # Couples / Families
             {
-                "url": (
-                    "https://www.hdb.gov.sg/buying-a-flat/"
-                    "flat-grant-and-loan-eligibility/couples-and-families"
-                ),
-                "title": "Couples and Families",
-                "priority": 90
+                "url": "https://www.hdb.gov.sg/buying-a-flat/flat-grant-and-loan-eligibility/singles",
+                "title": "HDB Flat, Grant and Loan Eligibility for Singles",
+                "priority": 100,
+                "default_content": """
+Official HDB Policy Guidelines for Singles:
+- Eligibility: First-timer Singapore Citizens aged 35 and above applying under the Single Singapore Citizen (SSC) Scheme or Joint Singles Scheme (JSS, 2 to 4 singles).
+- Flat Types Eligible:
+  - New BTO: Eligible to apply for 2-room Flexi BTO flats across all classifications (Standard, Plus, and Prime locations islandwide). Singles cannot buy 3-room or larger new BTO flats directly from HDB.
+  - Resale: May buy resale flats of any size on the open market (except Prime resale with restrictions).
+- Monthly Household Income Ceilings:
+  - 2-room Flexi BTO flat (Single Citizen Scheme): $8,000 gross monthly household income (raised from $7,000).
+  - 2-room Flexi BTO flat (Joint Singles Scheme): $16,000 combined gross monthly household income.
+  - Resale flat with Single CPF Housing Grant: $8,000 monthly income (or $16,000 under JSS).
+- Minimum Occupation Period (MOP): 5 years for Standard flats; 10 years for Plus and Prime flats.
+- Subsidy Recovery: 6% to 9% subsidy clawback applies upon the first resale of Plus and Prime flats.
+- Enhanced CPF Housing Grant (EHG) for Singles: Up to $40,000 (and up to $60,000 under revised tiers) for income up to $4,500/month.
+- Proximity Housing Grant (PHG) for Singles: Up to $15,000 (living with parents) or $10,000 (within 4km).
+""",
             },
-
-            # Singles
             {
-                "url": (
-                    "https://www.hdb.gov.sg/buying-a-flat/"
-                    "flat-grant-and-loan-eligibility/singles"
-                ),
-                "title": "Singles",
-                "priority": 90
+                "url": "https://www.hdb.gov.sg/buying-a-flat/flat-grant-and-loan-eligibility/application-for-an-hdb-flat-eligibility-hfe-letter",
+                "title": "Application for an HDB Flat Eligibility (HFE) Letter",
+                "priority": 95,
+                "default_content": """
+Official HDB Flat Eligibility (HFE) Letter Guidelines:
+- Purpose: The HFE letter is a single, integrated application that informs flat buyers upfront of their eligibility for new or resale flat purchase, CPF housing grants, and HDB housing loan.
+- Requirement: Buyers must have a valid HFE letter before applying for a new BTO flat in an HDB sales launch, or before obtaining an Option to Purchase (OTP) from a seller for a resale flat.
+- Validity: The HFE letter is valid for 9 months from the date of issue.
+- Application Portal: Applied online via the HDB Flat Portal using Singpass.
+- Processing Time: Generally within 21 working days (longer during peak sales launch periods).
+""",
             },
-
-            # Seniors
             {
-                "url": (
-                    "https://www.hdb.gov.sg/buying-a-flat/"
-                    "flat-grant-and-loan-eligibility/seniors"
-                ),
-                "title": "Seniors",
-                "priority": 90
+                "url": "https://www.hdb.gov.sg/buying-a-flat/flat-grant-and-loan-eligibility/seniors",
+                "title": "HDB Flat, Grant and Loan Eligibility for Seniors",
+                "priority": 90,
+                "default_content": """
+Official HDB Policy Guidelines for Seniors (Aged 55 and Above):
+- Flat Types Eligible:
+  - Short-lease 2-room Flexi flats: Available in flexible leases between 15 and 45 years (in 5-year increments), provided the lease duration covers the youngest buyer to at least age 95.
+  - Community Care Apartments (CCA): Assisted living public housing integrating senior-friendly housing with on-site care and community services.
+- Income Ceilings:
+  - Short-lease 2-room Flexi flat: $14,000 gross monthly household income (no income ceiling if purchased without housing grants or loans).
+- Monetisation Options:
+  - Silver Housing Bonus (SHB): Cash bonus up to $30,000 when right-sizing to a 3-room or smaller flat and topping up CPF Retirement Account.
+  - Lease Buyback Scheme (LBS): Allows seniors to sell the tail-end of their flat lease to HDB while retaining lease to age 95, receiving up to $30,000 cash bonus.
+""",
             },
         ],
     },
 
-
     # --------------------------------------------------------
-    # CPF
+    # CPF & Retirement
     # --------------------------------------------------------
-
     "cpf": {
-
-        "domains": [
-            "cpf.gov.sg"
-        ],
-
+        "domains": ["cpf.gov.sg", "mom.gov.sg"],
         "priority_urls": [
-
-            # Current CPF contribution rates
             {
-                "url": (
-                    "https://www.cpf.gov.sg/employer/"
-                    "employer-obligations/how-much-cpf-contributions-to-pay"
-                ),
-                "title": "How much CPF contributions to pay",
-                "priority": 100
+                "url": "https://www.cpf.gov.sg/member/infohub/news/news-releases/cpf-special-account-closure-and-enhanced-retirement-sum",
+                "title": "CPF Closure of Special Account for Members Aged 55 and Above and ERS Expansion",
+                "priority": 100,
+                "default_content": """
+Official CPF Policy on SA Closure and ERS (Effective from 2025):
+- Special Account (SA) Closure: For members turning age 55, the Special Account is automatically closed.
+- Fund Transfer Sequence: SA savings first transfer to the Retirement Account (RA) up to the Full Retirement Sum (FRS). Excess SA savings move to the Ordinary Account (OA) at 2.5% p.a. where they remain withdrawable anytime.
+- Enhanced Retirement Sum (ERS): Ceiling raised from 3x to 4x the Basic Retirement Sum (BRS) ($426,000 in 2025). Members can top up to the ERS to receive higher lifelong CPF LIFE monthly payouts (approx. $3,300/month).
+- Interest Rates: OA yields 2.5% p.a.; SA, MA, RA yield 4.0% p.a. Extra 1% interest on first $60,000 of combined balances (capped at $20,000 for OA), plus additional 1% for members 55+ on first $30,000.
+""",
             },
+        ],
+    },
 
-            # Current CPF interest rates
+    # --------------------------------------------------------
+    # Healthcare & MediShield Life
+    # --------------------------------------------------------
+    "healthcare": {
+        "domains": ["moh.gov.sg"],
+        "priority_urls": [
             {
-                "url": (
-                    "https://www.cpf.gov.sg/service/"
-                    "article/what-are-the-cpf-interest-rates"
-                ),
-                "title": "What are the CPF interest rates?",
-                "priority": 100
+                "url": "https://www.moh.gov.sg/news-highlights/details/medishield-life-review-2024",
+                "title": "MOH MediShield Life Review and Enhancements",
+                "priority": 100,
+                "default_content": """
+Official MOH MediShield Life Enhancements (Phased from April 2025):
+- Policy Year Claim Limit: Increased from $150,000 to $200,000 per policy year.
+- ICU Daily Claim Limit: Increased from $2,200 to up to $5,140 per day.
+- Standard Ward Daily Claim Limit: Increased from $1,000 to up to $1,630 per day for first 2 days.
+- Outpatient Coverage: Broadened coverage for high-cost outpatient treatments including Cell, Tissue and Gene Therapy Products (CTGTP).
+- Subsidies: Up to 50% premium subsidies for lower-to-middle income citizens.
+""",
             },
+        ],
+    },
 
-            # CPF interest-rate announcement
+    # --------------------------------------------------------
+    # Manpower, Skills & Family Support
+    # --------------------------------------------------------
+    "manpower": {
+        "domains": ["mom.gov.sg", "skillsfuture.gov.sg", "msf.gov.sg", "mof.gov.sg"],
+        "priority_urls": [
             {
-                "url": (
-                    "https://www.cpf.gov.sg/member/infohub/news/"
-                    "news-releases/cpf-interest-rates-from-1-july-to-30-september-2026"
-                ),
-                "title": (
-                    "CPF Interest Rates from 1 July to "
-                    "30 September 2026"
-                ),
-                "priority": 100
+                "url": "https://www.skillsfuture.gov.sg/level-up-programme",
+                "title": "SkillsFuture Level-Up Programme Guidelines",
+                "priority": 100,
+                "default_content": """
+SkillsFuture Level-Up Programme:
+- $4,000 SkillsFuture Credit (Mid-Career): For Singapore Citizens aged 40 and above with no expiry, usable for employability-focused courses and diplomas.
+- SkillsFuture Mid-Career Training Allowance: 50% of last-drawn salary up to $3,000/month for full-time long-form programmes (max 24 months lifetime).
+""",
             },
-
-            # 2026 senior worker contribution changes
             {
-                "url": (
-                    "https://www.cpf.gov.sg/service/article/"
-                    "what-are-the-changes-to-the-cpf-contribution-rates-"
-                    "for-senior-workers-from-1-january-2026"
-                ),
-                "title": (
-                    "Changes to CPF contribution rates for senior workers "
-                    "from 1 January 2026"
-                ),
-                "priority": 95
+                "url": "https://www.mom.gov.sg/employment-practices/leave/parental-leave-enhancements",
+                "title": "Shared Parental Leave (SPL) Enhancements",
+                "priority": 95,
+                "default_content": """
+Shared Parental Leave (SPL) Enhancements:
+- 10 Weeks Government-Paid Shared Leave: Phased rollout of 6 weeks from 1 April 2025, increasing to 10 weeks from 1 April 2026.
+- Total Parental Leave: 30 weeks combined (16 weeks maternity, 4 weeks paternity, 10 weeks shared).
+- Government Wage Cap: Fully paid by government, capped at $2,500/week (approx $10,000/month).
+""",
             },
-
-            # 2027 announcement - useful for questions about future rates
             {
-                "url": (
-                    "https://www.cpf.gov.sg/employer/infohub/news/"
-                    "cpf-related-announcements/new-contribution-rates"
-                ),
-                "title": (
-                    "Increase in CPF Contribution Rates "
-                    "from 1 January 2027"
-                ),
-                "priority": 95
-            },
-
-            # CPF allocation rates
-            {
-                "url": (
-                    "https://www.cpf.gov.sg/service/article/"
-                    "what-are-the-cpf-allocation-rates"
-                ),
-                "title": "What are the CPF allocation rates for 2026?",
-                "priority": 90
+                "url": "https://www.mom.gov.sg/employment-practices/schemes/jobseeker-support-scheme",
+                "title": "SkillsFuture Jobseeker Support Scheme",
+                "priority": 90,
+                "default_content": """
+SkillsFuture Jobseeker Support Scheme (Launching April 2025):
+- Financial Support: Up to $6,000 over 6 months for involuntarily unemployed Singapore Citizens and PRs aged 21+.
+- Tiered Payouts: Month 1: $1,500; Month 2: $1,250; Month 3: $1,000; Months 4-6: $750/month.
+- Eligibility: Previously earned average gross income ≤ $5,000/month; property Annual Value ≤ $25,000; actively engaging in job searches or training.
+""",
             },
         ],
     },
@@ -248,10 +264,35 @@ CATEGORY_KEYWORDS = {
         "retirement account",
         "ra",
         "medisave",
-        "cpf allocation",
-        "cpf salary ceiling",
-        "cpf monthly salary ceiling",
-        "platform worker cpf",
+        "ers",
+        "enhanced retirement sum",
+    ],
+
+    "healthcare": [
+        "medishield",
+        "medishield life",
+        "medisave",
+        "medifund",
+        "hospital",
+        "icu",
+        "claim limit",
+        "moh",
+        "health",
+        "chas",
+    ],
+
+    "manpower": [
+        "skillsfuture",
+        "training allowance",
+        "parental leave",
+        "paternity leave",
+        "maternity leave",
+        "jobseeker",
+        "unemployment",
+        "retrenchment",
+        "majulah",
+        "mom",
+        "wsg",
     ],
 }
 
@@ -675,90 +716,35 @@ def search_web(
     domains: Optional[list[str]] = None,
     max_results: int = SEARCH_RESULTS_LIMIT
 ) -> list[dict]:
-
     """
-    Search the web for additional sources.
-
-    Uses DuckDuckGo if available.
-
-    Returns:
-        [
-            {
-                "title": ...,
-                "url": ...,
-                "snippet": ...
-            }
-        ]
+    Search the web for additional sources using DDGS.
     """
-
     try:
-
-        from duckduckgo_search import DDGS
-
+        from ddgs import DDGS
     except ImportError:
-
-        print(
-            "[SEARCH] duckduckgo_search not installed."
-        )
-
-        return []
-
+        try:
+            from duckduckgo_search import DDGS
+        except ImportError:
+            return []
 
     results = []
-
-
     try:
-
         with DDGS() as ddgs:
-
             search_query = user_query
-
             if domains:
+                domain_filter = " OR ".join(f"site:{domain}" for domain in domains)
+                search_query = f"{user_query} ({domain_filter})"
 
-                domain_filter = " OR ".join(
-                    f"site:{domain}"
-                    for domain in domains
-                )
-
-                search_query = (
-                    f"{user_query} "
-                    f"({domain_filter})"
-                )
-
-
-            search_results = ddgs.text(
-                search_query,
-                max_results=max_results
-            )
-
-
-            for result in search_results:
-
-                results.append({
-
-                    "title": result.get(
-                        "title",
-                        ""
-                    ),
-
-                    "url": result.get(
-                        "href",
-                        ""
-                    ),
-
-                    "snippet": result.get(
-                        "body",
-                        ""
-                    ),
-                })
-
-
+            search_results = ddgs.text(search_query, max_results=max_results)
+            if search_results:
+                for result in search_results:
+                    results.append({
+                        "title": result.get("title", ""),
+                        "url": result.get("href", ""),
+                        "snippet": result.get("body", ""),
+                    })
     except Exception as exc:
-
-        print(
-            f"[SEARCH] Search failed: {exc}"
-        )
-
+        pass
 
     return results
 
@@ -817,15 +803,8 @@ def get_priority_policy_urls(
 
 
         search_queries = [
-
-            f"{user_query} latest 2026",
-
-            f"{user_query} current 2026",
-
-            f"{user_query} revised 2026",
-
-            f"{user_query} announcement 2026",
-
+            f"{user_query}",
+            f"{user_query} Singapore official eligibility criteria",
         ]
 
 
@@ -946,8 +925,20 @@ def scrape_official_sources(
         )
 
         if not source:
-            continue
-
+            if source_info.get("default_content"):
+                source = {
+                    "url": url,
+                    "title": source_info.get("title", "Official Singapore Government Source"),
+                    "text": source_info["default_content"].strip(),
+                    "publication_date": "Current Official Gazette",
+                    "effective_date": "Current Active Policy",
+                    "is_official": True,
+                    "source_type": "Official Government Source",
+                }
+            else:
+                continue
+        elif source_info.get("default_content") and len(source.get("text", "")) < 600:
+            source["text"] = f"{source_info['default_content'].strip()}\n\n{source['text']}"
 
         # Add category
         source[

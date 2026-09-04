@@ -4,7 +4,7 @@ import { sendChat } from "../api";
 import { loadDebateSession, saveDebateSession } from "../session";
 import type { ChatMessage, Digest } from "../types";
 import TopicSelector from "./TopicSelector";
-import { Sparkles, Bot, AlertCircle, X, Send } from "lucide-react";
+import { Sparkles, Bot, AlertCircle, X, Send, ShieldCheck, HelpCircle } from "lucide-react";
 
 interface Props {
   digest: Digest;
@@ -49,14 +49,15 @@ export default function ChatPanel({ digest }: Props) {
 
   const topicById = new Map(digest.topics.map((t) => [t.topic_id, t]));
 
-  async function submit() {
-    const text = input.trim();
+  async function handleSend(customText?: string) {
+    const text = (customText || input).trim();
     if (!text || busy) return;
-    const nextTopicId = pendingTopic ?? undefined;
+    const nextTopicId = pendingTopic ?? (digest.topics.length > 0 ? digest.topics[0].topic_id : undefined);
     setBusy(true);
     setBanner(null);
     setMessages((prev) => [...prev, { role: "user", content: text }]);
-    setInput("");
+    if (!customText) setInput("");
+
     try {
       const resp = await sendChat(digest.date, {
         session_id: sessionId ?? undefined,
@@ -82,92 +83,140 @@ export default function ChatPanel({ digest }: Props) {
       const msg =
         err?.error === "no_digest_for_date"
           ? "Load the digest first, then try chatting."
-          : err?.error === "scraper_not_available"
-            ? "Backend is in fixture mode. Set SCRAPER_MODE=sprs to fetch real transcripts."
-            : err?.message || "Something went wrong.";
+          : err?.message || "Something went wrong.";
       setBanner(msg);
-      // Remove the optimistic user message so a retry doesn't duplicate.
+      // Remove optimistic user message on failure
       setMessages((prev) => prev.slice(0, -1));
     } finally {
       setBusy(false);
     }
   }
 
+  const suggestedQuestions = [
+    "What key ministerial statements were delivered in this sitting?",
+    "Summarize what MPs debated on public transport and cost of living.",
+    "Which bills or legislative amendments were passed?",
+  ];
+
   return (
-    <section className="rounded-xl border border-slate-200 bg-white flex flex-col h-[75vh] shadow-sm">
-      <div className="border-b border-slate-200/80 p-3.5 bg-slate-50/50 rounded-t-xl">
+    <section className="rounded-2xl border border-stone-200 bg-white flex flex-col h-[78vh] shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="border-b border-stone-200 p-4 bg-stone-50/80">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-indigo-600" />
-            <h2 className="font-semibold text-slate-900 text-sm">
-              Debate Research Assistant
-            </h2>
+            <div className="w-6 h-6 rounded-lg bg-stone-900 text-white flex items-center justify-center">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+            </div>
+            <div>
+              <h2 className="font-serif font-bold text-stone-900 text-sm">
+                Hansard Research Agent
+              </h2>
+              <div className="text-[10px] text-stone-500 font-sans flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                <span>Document-grounded AI</span>
+              </div>
+            </div>
           </div>
-          <span className="text-[11px] font-mono text-slate-400">Nova Pro</span>
+          <span className="text-[10px] font-mono font-medium text-stone-500 bg-white px-2 py-0.5 rounded border border-stone-200">
+            Nova Pro
+          </span>
         </div>
 
         {topicIds.length > 0 && (
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            <span className="text-[11px] text-slate-500 self-center">Loaded:</span>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider self-center">
+              Loaded Docs:
+            </span>
             {topicIds.map((tid) => (
               <span
                 key={tid}
-                className="text-[11px] bg-indigo-50 border border-indigo-100 text-indigo-700 font-medium rounded-md px-2 py-0.5"
+                className="text-[11px] bg-stone-100 border border-stone-200 text-stone-800 font-medium rounded-md px-2 py-0.5"
                 title={tid}
               >
-                {truncate(topicById.get(tid)?.title ?? tid, 35)}
+                {truncate(topicById.get(tid)?.title ?? tid, 32)}
               </span>
             ))}
           </div>
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
+      {/* Message history */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
-          <div className="text-center py-8 px-4 text-sm text-slate-500 space-y-2">
-            <Bot className="w-8 h-8 text-slate-300 mx-auto" />
-            <p className="font-medium text-slate-700">Ask about this sitting</p>
-            <p className="text-xs text-slate-400">
-              Pick a topic from below to load its full parliamentary report into context, then ask any specific question.
-            </p>
+          <div className="py-6 px-2 text-center space-y-4">
+            <div className="w-10 h-10 rounded-full bg-stone-100 text-stone-600 flex items-center justify-center mx-auto">
+              <Bot className="w-5 h-5 text-stone-700" />
+            </div>
+            <div>
+              <p className="font-serif font-bold text-sm text-stone-900">
+                Inquire on this Parliament Sitting
+              </p>
+              <p className="text-xs text-stone-500 mt-1 max-w-xs mx-auto leading-relaxed">
+                Ask specific questions regarding MP speeches, ministerial answers, or legislative motions debated during this session.
+              </p>
+            </div>
+
+            {/* Suggested Question Pills */}
+            <div className="space-y-1.5 pt-2 text-left">
+              <div className="flex items-center gap-1 text-[11px] font-bold text-stone-400 uppercase tracking-wider">
+                <HelpCircle className="w-3 h-3" />
+                Suggested Questions:
+              </div>
+              {suggestedQuestions.map((q, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => handleSend(q)}
+                  disabled={busy}
+                  className="w-full text-left p-2 rounded-xl bg-stone-50 hover:bg-stone-100 text-stone-800 text-xs transition border border-stone-200/80 cursor-pointer"
+                >
+                  &ldquo;{q}&rdquo;
+                </button>
+              ))}
+            </div>
           </div>
         )}
+
         {messages.map((m, i) => (
           <MessageBubble key={i} m={m} />
         ))}
+
         {busy && (
-          <div className="flex items-center gap-2 text-xs text-slate-500 italic p-2">
-            <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-            <span>Analyzing debate documents…</span>
+          <div className="flex items-center gap-2 text-xs text-stone-500 italic p-2 bg-stone-50 rounded-xl border border-stone-100">
+            <div className="w-2 h-2 rounded-full bg-stone-600 animate-pulse" />
+            <span>Analyzing parliamentary Hansard debate documents…</span>
           </div>
         )}
+
         {banner && (
-          <div className="text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-2.5 flex items-start gap-2">
+          <div className="text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <span>{banner}</span>
           </div>
         )}
       </div>
 
-      <div className="border-t border-slate-200 p-3 space-y-2.5 bg-slate-50/40 rounded-b-xl">
+      {/* Input area */}
+      <div className="border-t border-stone-200 p-3 space-y-2 bg-stone-50/50">
         <TopicSelector
           topics={digest.topics}
           onSelect={(tid) => setPendingTopic(tid)}
         />
+        
         {pendingTopic && (
-          <div className="text-xs text-slate-700 bg-indigo-50/80 border border-indigo-100 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2">
-            <span className="truncate">
-              Next query loads:{" "}
-              <span className="font-semibold text-indigo-900">
+          <div className="text-xs text-stone-700 bg-stone-100 border border-stone-200 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2">
+            <span className="truncate text-[11px]">
+              Active context:{" "}
+              <span className="font-semibold text-stone-900">
                 {truncate(
                   topicById.get(pendingTopic)?.title ?? pendingTopic,
-                  45,
+                  40,
                 )}
               </span>
             </span>
             <button
               onClick={() => setPendingTopic(null)}
-              className="text-slate-400 hover:text-slate-700 p-0.5"
+              className="text-stone-400 hover:text-stone-700 p-0.5 cursor-pointer"
               title="Cancel"
               aria-label="Cancel selected topic"
             >
@@ -175,6 +224,7 @@ export default function ChatPanel({ digest }: Props) {
             </button>
           </div>
         )}
+
         <div className="flex gap-2">
           <textarea
             value={input}
@@ -182,18 +232,18 @@ export default function ChatPanel({ digest }: Props) {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                submit();
+                handleSend();
               }
             }}
-            placeholder="Ask a question about the sitting…"
+            placeholder="Ask anything about this sitting…"
             rows={2}
-            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+            className="flex-1 border border-stone-300 rounded-xl px-3 py-2 text-xs resize-none focus:outline-hidden focus:ring-1 focus:ring-stone-800 bg-white text-stone-900"
             disabled={busy}
           />
           <button
-            onClick={submit}
+            onClick={() => handleSend()}
             disabled={busy || !input.trim()}
-            className="rounded-lg bg-slate-900 text-white text-xs sm:text-sm px-3.5 py-2 font-medium disabled:opacity-40 hover:bg-slate-800 transition flex items-center justify-center shrink-0 shadow-xs"
+            className="rounded-xl bg-stone-900 text-white text-xs px-3.5 py-2 font-semibold disabled:opacity-40 hover:bg-stone-800 transition flex items-center justify-center shrink-0 shadow-xs cursor-pointer"
           >
             <Send className="w-4 h-4" />
           </button>
@@ -210,20 +260,20 @@ function MessageBubble({ m }: { m: ChatMessage }) {
       <div
         className={
           isUser
-            ? "max-w-[90%] rounded-xl bg-slate-900 text-white text-xs sm:text-sm px-3.5 py-2.5 text-left shadow-xs"
-            : "max-w-[95%] rounded-xl bg-white text-slate-900 text-xs sm:text-sm px-3.5 py-2.5 border border-slate-200 text-left shadow-xs"
+            ? "max-w-[90%] rounded-2xl bg-stone-900 text-white text-xs px-4 py-2.5 text-left shadow-xs"
+            : "max-w-[95%] rounded-2xl bg-white text-stone-900 text-xs px-4 py-3 border border-stone-200 text-left shadow-xs"
         }
       >
         {isUser ? (
-          <p className="whitespace-pre-wrap">{m.content}</p>
+          <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
         ) : (
-          <div className="prose-chat text-xs sm:text-sm">
+          <div className="prose prose-xs max-w-none prose-stone prose-p:leading-relaxed prose-headings:font-serif">
             <ReactMarkdown>{m.content}</ReactMarkdown>
           </div>
         )}
       </div>
       {!isUser && m.grounded === false && (
-        <div className="mt-1 text-[11px] text-amber-700 flex items-center gap-1 font-medium">
+        <div className="mt-1 text-[10px] text-amber-700 flex items-center gap-1 font-medium px-1">
           <span>⚠️ The parliamentary report does not cover this inquiry.</span>
         </div>
       )}

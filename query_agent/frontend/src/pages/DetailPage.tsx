@@ -59,33 +59,43 @@ export default function DetailPage() {
 
   if (!digest) {
     return (
-      <div className="py-24 text-center space-y-3">
-        <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin mx-auto" />
-        <p className="text-slate-500 text-sm">Synthesizing debate sitting digest…</p>
+      <div className="py-28 text-center space-y-3">
+        <RefreshCw className="w-8 h-8 text-stone-600 animate-spin mx-auto" />
+        <p className="text-stone-500 text-sm font-serif italic">Synthesizing debate sitting digest &amp; Hansard records…</p>
       </div>
     );
   }
 
   return (
-    <div className="pb-12">
-      <Link
-        to="/debates"
-        className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium text-slate-500 hover:text-indigo-600 transition mb-6"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        <span>Back to debates feed</span>
-      </Link>
+    <div className="pb-16 max-w-7xl mx-auto">
+      {/* Top Breadcrumb & Metadata Navigation */}
+      <div className="flex items-center justify-between pb-4 mb-6 border-b border-stone-200">
+        <Link
+          to="/debates"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500 hover:text-stone-900 transition"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to Parliamentary Sittings Archive</span>
+        </Link>
+        <span className="text-[11px] text-stone-400 font-sans">
+          SPRS Official Record &bull; Singapore Legislative Assembly
+        </span>
+      </div>
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(340px,1.2fr)]">
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(350px,1.2fr)]">
         <div>
-          <div className="mb-6">
-            <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md mb-2">
-              <Calendar className="w-3.5 h-3.5" />
+          {/* Sitting Masthead */}
+          <div className="mb-8">
+            <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-stone-600 bg-stone-100 px-3 py-1 rounded-md mb-3 border border-stone-200">
+              <Calendar className="w-3.5 h-3.5 text-stone-700" />
               <span>Sitting of {digest.date}</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 mt-1">
+            <h1 className="font-serif font-black text-2xl sm:text-3xl md:text-4xl text-stone-900 tracking-tight leading-tight">
               {digest.title}
             </h1>
+            <p className="text-xs text-stone-500 mt-2 font-sans">
+              Official Legislative Record &bull; {digest.topic_count} Topics Debated &bull; Hansard Verified
+            </p>
           </div>
 
           {digest.youtube_url && <YouTubeEmbed url={digest.youtube_url} />}
@@ -94,7 +104,8 @@ export default function DetailPage() {
           <TopicList topics={digest.topics} />
         </div>
 
-        <aside className="lg:sticky lg:top-20 lg:self-start">
+        {/* Sticky Research Assistant Sidebar */}
+        <aside className="lg:sticky lg:top-20 lg:self-start space-y-6">
           <ChatPanel digest={digest} />
         </aside>
       </div>
@@ -106,7 +117,7 @@ function YouTubeEmbed({ url }: { url: string }) {
   const id = extractYoutubeId(url);
   if (!id) return null;
   return (
-    <div className="aspect-video mb-8 rounded-xl overflow-hidden bg-black shadow-md border border-slate-200">
+    <div className="aspect-video mb-8 rounded-2xl overflow-hidden bg-black shadow-md border border-stone-300">
       <iframe
         className="w-full h-full"
         src={`https://www.youtube.com/embed/${id}`}

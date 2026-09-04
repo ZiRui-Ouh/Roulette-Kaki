@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Calendar, Video, ArrowRight } from "lucide-react";
+import { Calendar, Video, ArrowRight, FileText } from "lucide-react";
 import type { DebateSummary } from "../types";
 
 export default function DebateCard({ debate }: { debate: DebateSummary }) {
@@ -7,41 +7,42 @@ export default function DebateCard({ debate }: { debate: DebateSummary }) {
   return (
     <Link
       to={`/debates/${debate.date}`}
-      className="group block rounded-xl border border-slate-200 bg-white overflow-hidden hover:border-indigo-300 hover:shadow-md transition duration-200 flex flex-col justify-between"
+      className="group block rounded-2xl border border-stone-200 bg-white overflow-hidden hover:border-stone-400 hover:shadow-md transition duration-200 flex flex-col justify-between"
     >
       <div>
         {youtubeId ? (
-          <div className="aspect-video bg-slate-100 relative overflow-hidden">
+          <div className="aspect-video bg-stone-900 relative overflow-hidden">
             <img
               src={`https://img.youtube.com/vi/${youtubeId}/mqdefault.jpg`}
               alt={debate.title}
-              className="w-full h-full object-cover group-hover:scale-102 transition duration-300"
+              className="w-full h-full object-cover group-hover:scale-105 transition duration-300 opacity-90"
               loading="lazy"
             />
-            <div className="absolute inset-0 bg-slate-900/10 group-hover:bg-slate-900/0 transition" />
-            <div className="absolute bottom-2 right-2 bg-black/70 text-white text-[11px] px-2 py-0.5 rounded backdrop-blur-xs flex items-center gap-1">
-              <Video className="w-3 h-3" />
+            <div className="absolute inset-0 bg-stone-900/10 group-hover:bg-transparent transition" />
+            <div className="absolute bottom-2 right-2 bg-black/80 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded backdrop-blur-xs flex items-center gap-1">
+              <Video className="w-3 h-3 text-red-500" />
               <span>SPRS Recording</span>
             </div>
           </div>
         ) : (
-          <div className="aspect-video bg-slate-100 flex items-center justify-center text-slate-400 text-sm">
-            No video recording
+          <div className="aspect-video bg-stone-100 flex items-center justify-center text-stone-400 text-xs">
+            <FileText className="w-5 h-5 mr-1" />
+            <span>Hansard Record</span>
           </div>
         )}
-        <div className="p-4">
-          <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-600 mb-2">
-            <Calendar className="w-3.5 h-3.5" />
+        <div className="p-5">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-stone-500 mb-2">
+            <Calendar className="w-3.5 h-3.5 text-stone-700" />
             <span>{debate.date}</span>
           </div>
-          <h3 className="font-semibold text-slate-900 line-clamp-2 text-base group-hover:text-indigo-600 transition">
+          <h3 className="font-serif font-bold text-stone-900 line-clamp-2 text-base group-hover:text-indigo-900 transition leading-snug">
             {debate.title}
           </h3>
         </div>
       </div>
 
-      <div className="px-4 pb-4 pt-1 flex items-center justify-between text-xs font-medium text-slate-500 group-hover:text-indigo-600">
-        <span>View full sitting digest</span>
+      <div className="px-5 pb-5 pt-1 flex items-center justify-between text-xs font-semibold text-stone-500 group-hover:text-stone-900 border-t border-stone-100">
+        <span>View full sitting digest &amp; chat</span>
         <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition" />
       </div>
     </Link>

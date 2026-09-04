@@ -9,9 +9,9 @@ export default function InterestingTopics({ digest }: { digest: Digest }) {
   return (
     <section className="mb-8">
       <div className="flex items-center gap-2 mb-4">
-        <Lightbulb className="w-5 h-5 text-amber-500" />
-        <h2 className="text-lg font-semibold text-slate-900">
-          Key Highlights & Noteworthy Debates
+        <Lightbulb className="w-5 h-5 text-amber-600" />
+        <h2 className="font-serif font-bold text-lg text-stone-900">
+          Key Highlights &amp; Noteworthy Parliamentary Debates
         </h2>
       </div>
 
@@ -22,12 +22,12 @@ export default function InterestingTopics({ digest }: { digest: Digest }) {
           return (
             <div
               key={it.topic_id}
-              className="rounded-xl border border-amber-200/70 bg-gradient-to-br from-amber-50/50 to-white p-4 shadow-xs"
+              className="rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-50/40 via-white to-white p-5 shadow-xs"
             >
-              <div className="font-semibold text-slate-900 mb-1.5 text-sm sm:text-base">
+              <div className="font-serif font-bold text-stone-900 mb-1.5 text-sm sm:text-base leading-snug">
                 {topic.title}
               </div>
-              <div className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+              <div className="text-xs text-stone-600 leading-relaxed font-sans">
                 {it.reason}
               </div>
             </div>

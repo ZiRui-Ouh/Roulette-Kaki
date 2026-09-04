@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from services.bedrock import ask_nova
 from services.webscraper import (
+    build_search_intelligence,
     match_policy_urls,
     scrape_sources,
     scrape_unofficial_sources,
@@ -56,39 +57,31 @@ For EVERY policy figure, rule, eligibility requirement or deadline:
 - Prefer the newest official announcement or guideline.
 - If a newer official source changes an older figure, use ONLY the newer figure as the CURRENT figure.
 
-Example:
-
-Old official source:
-Income ceiling = $14,000
-Effective: 1 April 2023
-
-New official source:
-Income ceiling = $16,000
-Effective: 24 August 2026
-
-Output:
-
-CURRENT:
-Income ceiling = $16,000
-
-HISTORICAL:
-$14,000 applied before 24 August 2026.
-
-Do NOT present $14,000 as a current figure.
+If an older policy figure has been officially updated:
+- State the CURRENT figure clearly.
+- Note the effective date.
+- Do NOT present historical figures as current.
 
 ==================================================
-3. CONFLICT RESOLUTION
+3. CONFLICT RESOLUTION & FACTUAL BENCHMARKS
 ==================================================
+
+Official Singapore Policy Benchmarks:
+- HDB BTO 4-room and larger (Families/Couples): Income ceiling is $16,000/month (raised from $14,000).
+- HDB BTO 2-room Flexi (Singles 35+): Income ceiling is $8,000/month (raised from $7,000).
+- Executive Condominiums (EC): Income ceiling is $18,000/month (raised from $16,000).
+- 3-room BTO Flats: $8,000 or $16,000 depending on project.
+- CPF: OA 2.5%, SA/MA/RA 4.0%. SA closes at 55. ERS is 4x BRS ($426,000 in 2025).
+
+You must preserve the exact relationship:
+- FAMILIES / COUPLES -> $16,000
+- SINGLES -> $8,000
+- EC -> $18,000
 
 When two official sources contain different figures:
-
-1. Compare their publication dates.
-2. Check the effective date of each policy.
-3. Determine whether the newer source explicitly changes the older policy.
-4. Use the newest applicable figure as CURRENT.
-5. Clearly label the older figure as HISTORICAL.
-
-Never simply list conflicting figures without explaining which one is currently applicable.
+1. Compare publication/effective dates.
+2. Ensure you are comparing the same exact category (e.g. do not mix EC with BTO, do not mix Singles with Families).
+3. Use the verified current figure.
 
 ==================================================
 4. DIRECT OFFICIAL SOURCES
@@ -203,27 +196,33 @@ def build_search_synthesis_prompt(
     """Build prompt to synthesize scraped search findings with recency awareness."""
     official_text = ""
     for idx, src in enumerate(official_sources, 1):
+        content = src.get("content") or src.get("text") or ""
+        snippet = src.get("search_snippet", "")
+        combined_content = f"{snippet}\n\n{content}".strip() if snippet else content
         official_text += f"""
 [OFFICIAL SOURCE {idx}]
 Title: {src.get('title', 'Official Government Source')}
 URL: {src.get('url', '')}
 Type: {src.get('source_type', 'Official Portal')}
-Last Updated: {src.get('last_updated', 'Not specified')}
+Last Updated: {src.get('last_updated', src.get('publication_date', 'Not specified'))}
 Content:
-{src.get('content', '')}
+{combined_content}
 -------------------------
 """
 
     unofficial_text = ""
     for idx, src in enumerate(unofficial_sources, 1):
+        content = src.get("content") or src.get("text") or ""
+        snippet = src.get("search_snippet", "")
+        combined_content = f"{snippet}\n\n{content}".strip() if snippet else content
         unofficial_text += f"""
 [UNOFFICIAL SOURCE {idx}]
 Title: {src.get('title', 'Community Discussion')}
 URL: {src.get('url', '')}
 Type: {src.get('source_type', 'Unofficial Forum')}
-Last Updated: {src.get('last_updated', 'Not specified')}
+Last Updated: {src.get('last_updated', src.get('publication_date', 'Not specified'))}
 Content:
-{src.get('content', '')}
+{combined_content}
 -------------------------
 """
 
@@ -249,12 +248,6 @@ def gather_and_search(
     """
     Search, scrape, and structure data from official Singapore government sources
     and community discussion platforms.
-
-    Returns:
-        dict with keys:
-            - official_sources: list[dict]
-            - unofficial_sources: list[dict]
-            - search_summary: str
     """
     if not question or not question.strip():
         raise ValueError("Question cannot be empty.")
@@ -264,19 +257,18 @@ def gather_and_search(
     if provided_sources:
         all_sources.extend(provided_sources)
 
-    target_urls = list(urls or [])
-
-    # If no explicit URLs provided, intelligently match across multi-agency knowledge map
-    if not target_urls and not provided_sources:
-        official_urls, community_urls = match_policy_urls(question)
-        target_urls.extend(official_urls + community_urls)
-
-    if target_urls:
-        scraped = scrape_sources(target_urls)
+    if urls:
+        scraped = scrape_sources(urls)
         all_sources.extend(scraped)
+    elif not provided_sources:
+        intel = build_search_intelligence(question, include_unofficial=True)
+        if intel.get("official_sources"):
+            all_sources.extend(intel["official_sources"])
+        if intel.get("unofficial_sources"):
+            all_sources.extend(intel["unofficial_sources"])
 
-    official_sources = [s for s in all_sources if s.get("is_official", False)]
-    unofficial_sources = [s for s in all_sources if not s.get("is_official", False)]
+    official_sources = [s for s in all_sources if s.get("is_official", True)]
+    unofficial_sources = [s for s in all_sources if not s.get("is_official", True)]
 
     # If no sources gathered at all
     if not official_sources and not unofficial_sources:

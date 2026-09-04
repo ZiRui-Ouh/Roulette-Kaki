@@ -55,9 +55,43 @@ export interface ApiError {
   message: string;
 }
 
-export interface PolicyQueryHistory {
+export interface PolicyKeyFact {
+  label: string;
+  value: string;
+  note?: string;
+}
+
+export interface PolicyOfficialSource {
+  title: string;
+  url: string;
+  authority: string;
+}
+
+export type PolicyCategory =
+  | "Housing"
+  | "CPF & Finance"
+  | "Healthcare"
+  | "Jobs & Skills"
+  | "Grants & Families"
+  | "Parliament & Hansard"
+  | "Transport & Infrastructure";
+
+export interface Policy {
   id: string;
-  question: string;
-  answer: string;
-  timestamp: number;
+  title: string;
+  headline: string;
+  category: PolicyCategory;
+  ministry: string;
+  publishedAt: string;
+  effectiveDate: string;
+  status: "Active" | "Gazetted" | "Upcoming Revision" | "Implemented";
+  badge?: string;
+  summary: string;
+  leadParagraph: string;
+  readTime: string;
+  keyFacts: PolicyKeyFact[];
+  officialSources: PolicyOfficialSource[];
+  suggestedQuestions: string[];
+  initialBriefing: string;
+  relatedPolicyIds?: string[];
 }
