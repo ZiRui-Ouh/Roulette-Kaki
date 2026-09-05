@@ -32,14 +32,25 @@ log = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = """You are a research assistant for Singapore Parliament debates.
-You will answer questions using ONLY the attached debate report documents.
+
+You answer questions using ONLY the attached documents. The FIRST attached
+document is a SITTING OVERVIEW listing the digest summary and every topic
+debated in the sitting. Any additional attachments are full transcripts
+for topics the user has explicitly loaded.
 
 Rules:
-- If the answer is present in the documents, cite the topic title and
-  speaker where relevant.
-- If the answer is NOT in the documents, output exactly the marker
-  <grounded>false</grounded> at the end of your reply, then say the report
-  does not cover it.
+- For questions about the sitting as a whole ("what topics were covered?",
+  "what statements were delivered?", "what bills were passed?"), answer
+  from the sitting overview.
+- For questions about a specific topic ("what did MP X say about Y?",
+  "give me a summary of topic Z"), answer from that topic's transcript
+  when it is attached. If the topic appears in the overview but its
+  transcript is NOT attached, tell the user which topic title to load
+  from the sitting summary and stop there.
+- Cite the topic title and speaker where relevant.
+- If the answer is NOT in any attached document, output exactly the
+  marker <grounded>false</grounded> at the end of your reply, then say
+  the report does not cover it.
 - Do not answer from general knowledge. Do not speculate.
 """
 
@@ -109,6 +120,57 @@ def _persist_turn(
     storage.put_session(session)  # refreshes TTL to now + 3600
 
 
+def _build_sitting_overview(date: str, digest: dict) -> bedrock.Document:
+    """Sitting-wide metadata document, always attached at message 0.
+
+    Contains the digest's plain-text summary and the full topic index
+    (title + speakers per topic). Marked `is_overview=True` so
+    `bedrock._cap_documents` doesn't drop it under the 5-topic rule; it
+    still counts toward the 50K-token session budget.
+    """
+    from html import escape
+
+    title = digest.get("title") or f"Parliament Sitting of {date}"
+    summary = digest.get("summary") or "No summary available."
+    topics = digest.get("topics") or []
+
+    topics_html_parts: list[str] = []
+    for t in topics:
+        t_title = escape(t.get("title") or t.get("topic_id") or "Untitled")
+        t_id = escape(t.get("topic_id") or "")
+        speakers = t.get("speakers") or []
+        speakers_str = escape(", ".join(speakers)) if speakers else ""
+        topics_html_parts.append(
+            f"<li><strong>{t_title}</strong>"
+            + (f" (id: <code>{t_id}</code>)" if t_id else "")
+            + (f" &mdash; speakers: {speakers_str}" if speakers_str else "")
+            + "</li>"
+        )
+    topics_html = "\n".join(topics_html_parts) or "<li>No topics recorded.</li>"
+
+    body = (
+        "<html><body>"
+        f"<h1>{escape(title)}</h1>"
+        f"<p><em>Sitting overview for {escape(date)}. Use this document "
+        f"to answer questions about the sitting as a whole; use the "
+        f"individual topic transcripts (attached separately) for details "
+        f"on specific debates.</em></p>"
+        "<h2>Digest Summary</h2>"
+        f"<p>{escape(summary)}</p>"
+        f"<h2>Topics debated ({len(topics)})</h2>"
+        f"<ul>{topics_html}</ul>"
+        "</body></html>"
+    ).encode("utf-8")
+
+    return bedrock.Document(
+        topic_id=f"sitting-overview-{date}",
+        name=f"sitting-overview-{date}",
+        format="html",
+        bytes_=body,
+        is_overview=True,
+    )
+
+
 def _to_topic_meta(digest_topic: dict) -> TopicMeta:
     """Rehydrate a TopicMeta dataclass from the dict stored inside the
     digest row's `topics` list. Used to hand off to
@@ -154,7 +216,10 @@ def run_chat(
             )
 
     # --- hydrate report bytes for every loaded topic --------------------
-    docs: list[bedrock.Document] = []
+    # Sitting overview is always attached first — gives Nova Pro
+    # sitting-wide context for general questions and exempts from the
+    # 5-topic cap. See _build_sitting_overview.
+    docs: list[bedrock.Document] = [_build_sitting_overview(date, digest)]
     for tid in session["topics_loaded"]:
         meta = topic_meta_by_id.get(tid)
         if meta is None:
@@ -170,12 +235,29 @@ def run_chat(
             log.info("chat: fetching report for %s from SPRS", tid)
             try:
                 bytes_ = scraper.fetch_report(_to_topic_meta(meta))
+                # Cache ONLY real fetched bytes. If we cached the
+                # placeholder below, a transient SPRS failure would
+                # poison the S3 cache and every future turn would
+                # serve the empty stub instead of retrying.
+                storage.put_report(date, tid, ext, bytes_)
             except Exception as e:
-                log.info("SPRS fetch fallback for %s: %s", tid, e)
+                log.info(
+                    "SPRS fetch failed for %s (%s) — attaching metadata-only "
+                    "placeholder ephemerally; will retry SPRS next turn",
+                    tid,
+                    e,
+                )
                 topic_title = meta.get("title", tid)
                 speakers_str = ", ".join(meta.get("speakers", []))
-                bytes_ = f"<html><body><h1>{topic_title}</h1><p>Speakers: {speakers_str}</p><p>Official Hansard Parliamentary debate transcript for {topic_title}. Deliberations held on {date}.</p></body></html>".encode("utf-8")
-            storage.put_report(date, tid, ext, bytes_)
+                bytes_ = (
+                    f"<html><body><h1>{topic_title}</h1>"
+                    f"<p>Speakers: {speakers_str}</p>"
+                    f"<p>NOTE: Full transcript for this topic could not be "
+                    f"retrieved this turn. Only the topic title and speakers "
+                    f"are available. Ask the user to try again shortly.</p>"
+                    f"</body></html>"
+                ).encode("utf-8")
+                # Deliberately NOT calling storage.put_report — see docstring above.
         docs.append(
             bedrock.Document(
                 topic_id=tid,

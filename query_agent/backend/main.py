@@ -1,19 +1,34 @@
+"""FastAPI app for the Singapore Policy & Legislative Intelligence API.
+
+Merges the Policy Query Agent (`POST /query`) with the Parliament Debate
+Digest (`/debates`, `/sittings`, `/debates/{date}`, `/debates/{date}/chat`)
+under a single FastAPI app. Both feature sets share `services/bedrock.py`,
+`services/storage.py`, and the SPRS scraper stack.
+
+Error-handling philosophy: agents raise typed exceptions (`ValueError`,
+`NotImplementedError`, `SittingsUnavailableError`); this module maps each
+to a narrow HTTP response. No broad `except Exception` fallbacks — the
+API never silently synthesizes fake data on failure.
+"""
+
+from __future__ import annotations
+
 import logging
 import os
-import sys
 import uuid
 from typing import Optional
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from agents.query import answer_question
 from agents import digest as digest_agent
 from agents import research as research_agent
+from agents.query import answer_question
 from services import sittings as sittings_service
 from services import storage as storage_service
 
-# Ensure default environment configurations if not explicitly set
+# Default environment for local demo. Clear these for real-AWS / real-scraper mode.
 os.environ.setdefault("USE_LOCAL_STUBS", "1")
 os.environ.setdefault("SCRAPER_MODE", "fixture")
 os.environ.setdefault("YOUTUBE_PLAYLIST", "PLetiU3qG4uSrSjL6UlfVsgR89lxBzP5D1")
@@ -22,7 +37,10 @@ log = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Singapore Policy & Legislative Intelligence API",
-    description="Unified API for Policy Query Agent with Search Agent intelligence and Parliamentary Debate Hansard Digest.",
+    description=(
+        "Unified API for the Policy Query Agent (with Search Agent "
+        "intelligence) and the Parliamentary Debate Hansard Digest."
+    ),
     version="1.0.0",
 )
 
@@ -47,14 +65,12 @@ app.add_middleware(
 )
 
 
-# --- Policy Models -----------------------------------------------------------
+# --- Models ------------------------------------------------------------------
 
 class QueryRequest(BaseModel):
     question: str
     urls: list[str] | None = None
 
-
-# --- Debate Models -----------------------------------------------------------
 
 class DebateSummary(BaseModel):
     date: str
@@ -78,42 +94,52 @@ class ChatResponse(BaseModel):
 # --- Root & Health -----------------------------------------------------------
 
 @app.get("/")
-def home():
+def root() -> dict:
     return {
         "service": "Singapore Policy & Parliamentary Intelligence API",
         "status": "online",
-        "search_agent_integrated": True,
-        "parliament_debates_integrated": True,
         "endpoints": [
             "POST /query",
+            "GET  /health",
             "GET  /sittings",
             "GET  /debates",
             "GET  /debates/{date}",
             "POST /debates/{date}/chat",
+            "GET  /docs   (Swagger UI, interactive)",
         ],
     }
 
 
 @app.get("/health")
-def health():
+def health() -> dict:
     return {"status": "ok", "service": "policy-and-parliament-api"}
 
 
-# --- Policy Query Agent Endpoint ---------------------------------------------
+# --- Policy Query Agent ------------------------------------------------------
 
 @app.post("/query")
-def query(q: QueryRequest):
-    answer = answer_question(
-        question=q.question,
-        urls=q.urls,
-    )
+def query(q: QueryRequest) -> dict:
+    if not q.question or not q.question.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "empty_question", "message": "question must be non-empty"},
+        )
+    answer = answer_question(question=q.question, urls=q.urls)
     return {"answer": answer}
 
 
 # --- Parliamentary Debate Endpoints ------------------------------------------
 
+@app.get("/debates")
+def list_debates() -> dict:
+    # Diagnostic endpoint for "already-cached digests"; the frontend feed
+    # uses /sittings. Returns [] under USE_LOCAL_STUBS.
+    items = storage_service.list_digests()
+    return {"debates": [DebateSummary(**d).model_dump() for d in items]}
+
+
 @app.get("/sittings")
-def get_sittings(limit: int = 6, offset: int = 0):
+def get_sittings(limit: int = 6, offset: int = 0) -> dict:
     if limit < 1 or limit > 25 or offset < 0 or offset > 100:
         raise HTTPException(
             status_code=400,
@@ -124,71 +150,37 @@ def get_sittings(limit: int = 6, offset: int = 0):
         )
     try:
         return sittings_service.list_sittings(limit=limit, offset=offset)
-    except Exception as e:
-        log.warning("sittings service exception: %s", e)
-        # Graceful fallback sitting list
-        return {
-            "sittings": [
-                {
-                    "date": "2026-08-05",
-                    "title": "Parliament Sitting 5 Aug 2026",
-                    "youtube_url": "https://www.youtube.com/watch?v=fixture-sitting-20260805",
-                },
-                {
-                    "date": "2026-08-04",
-                    "title": "Parliament Sitting 4 Aug 2026 (English interpretation)",
-                    "youtube_url": "https://www.youtube.com/watch?v=parl-20260804",
-                },
-                {
-                    "date": "2026-07-07",
-                    "title": "Parliament Sitting 7 July 2026 (English interpretation)",
-                    "youtube_url": "https://www.youtube.com/watch?v=parl-20260707",
-                },
-            ],
-            "total": 3,
-            "has_more": False,
-        }
-
-
-@app.get("/debates")
-def list_debates():
-    items = storage_service.list_digests()
-    if not items:
-        # Pre-seed with available fixtures if empty
-        items = [
-            {
-                "date": "2026-08-05",
-                "title": "Sitting of 05 August 2026",
-                "youtube_url": "https://www.youtube.com/watch?v=fixture-sitting-20260805",
-            }
-        ]
-    return {"debates": [DebateSummary(**d).model_dump() for d in items]}
+    except sittings_service.SittingsUnavailableError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "sittings_unavailable", "message": str(e)},
+        )
 
 
 @app.get("/debates/{date}")
-def get_debate(date: str, refresh: bool = False):
+def get_debate(date: str, refresh: bool = False) -> dict:
     try:
         result = digest_agent.run_digest(date, refresh=refresh)
-    except Exception as e:
-        log.warning("digest generation error for %s: %s", date, e)
-        result = {
+    except NotImplementedError:
+        # Defensive fallback so a partial regression can't 500 the demo.
+        log.warning("digest agent NotImplementedError for %s — returning stub", date)
+        return {
             "date": date,
-            "title": f"Parliament Sitting of {date}",
-            "youtube_url": f"https://www.youtube.com/watch?v=sitting-{date}",
-            "summary": f"Parliamentary deliberations for {date} covered ministerial oral questions, public policy accountability, and legislative reviews.",
+            "title": f"Sitting of {date} (stub)",
+            "youtube_url": "",
+            "summary": "Stub digest — digest agent is not yet implemented.",
             "topic_count": 0,
-            "category_breakdown": {"Oral Answers": 3, "Bills": 2, "Motions": 1},
+            "category_breakdown": {},
             "interesting_topics": [],
             "topics": [],
         }
-
     if isinstance(result, dict) and result.get("error") == "no_sitting":
         raise HTTPException(status_code=404, detail=result)
     return result
 
 
 @app.post("/debates/{date}/chat", response_model=ChatResponse)
-def chat_debate(date: str, req: ChatRequest):
+def chat_debate(date: str, req: ChatRequest) -> ChatResponse:
     session_id = req.session_id or str(uuid.uuid4())
     try:
         result = research_agent.run_chat(
@@ -198,29 +190,18 @@ def chat_debate(date: str, req: ChatRequest):
             topic_id=req.topic_id,
         )
     except ValueError as e:
-        # Ensure digest is loaded first if needed
-        try:
-            digest_agent.run_digest(date)
-            result = research_agent.run_chat(
-                session_id=session_id,
-                date=date,
-                message=req.message,
-                topic_id=req.topic_id,
-            )
-        except Exception as retry_err:
-            raise HTTPException(
-                status_code=400,
-                detail={"error": "no_digest_for_date", "message": str(retry_err)},
-            )
-    except Exception as e:
-        log.warning("chat debate error: %s", e)
-        result = research_agent.ChatResult(
-            reply=f"In the parliamentary session of {date}, members discussed policy oversight and legislative matters relating to '{req.message}'.",
-            topics_used=[req.topic_id] if req.topic_id else [],
-            grounded=True,
-            usage={},
+        # e.g. no digest for date — caller must GET /debates/{date} first.
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "no_digest_for_date", "message": str(e)},
         )
-
+    except NotImplementedError as e:
+        # Reached scraper.fetch_report in a mode without report bytes
+        # (SCRAPER_MODE=fixture). Tell the caller how to fix it.
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "scraper_not_available", "message": str(e)},
+        )
     return ChatResponse(
         session_id=session_id,
         reply=result.reply,

@@ -83,7 +83,9 @@ export default function ChatPanel({ digest }: Props) {
       const msg =
         err?.error === "no_digest_for_date"
           ? "Load the digest first, then try chatting."
-          : err?.message || "Something went wrong.";
+          : err?.error === "scraper_not_available"
+            ? "Backend is in fixture mode. Set SCRAPER_MODE=sprs to fetch real transcripts."
+            : err?.message || "Something went wrong.";
       setBanner(msg);
       // Remove optimistic user message on failure
       setMessages((prev) => prev.slice(0, -1));

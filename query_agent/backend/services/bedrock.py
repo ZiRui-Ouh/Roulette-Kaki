@@ -72,19 +72,24 @@ class Document:
     name: str
     format: DocFormat
     bytes_: bytes
+    # is_overview=True marks a sitting-wide metadata doc (digest summary +
+    # topic index). Exempt from the 5-topic cap because it isn't a full
+    # report body; still counts toward the 50K-token budget.
+    is_overview: bool = False
 
 
 def _cap_documents(docs: list[Document]) -> list[Document]:
-    kept = list(docs)
-    while len(kept) > MAX_TOPICS_PER_SESSION:
-        dropped = kept.pop(0)
+    overviews = [d for d in docs if d.is_overview]
+    topics = [d for d in docs if not d.is_overview]
+    while len(topics) > MAX_TOPICS_PER_SESSION:
+        dropped = topics.pop(0)
         log.warning("dropping topic %s (over 5-topic cap)", dropped.topic_id)
-    total = sum(int(len(d.bytes_) * APPROX_TOKENS_PER_BYTE) for d in kept)
-    while total > MAX_DOC_TOKENS_PER_SESSION and kept:
-        dropped = kept.pop(0)
+    total = sum(int(len(d.bytes_) * APPROX_TOKENS_PER_BYTE) for d in overviews + topics)
+    while total > MAX_DOC_TOKENS_PER_SESSION and topics:
+        dropped = topics.pop(0)
         total -= int(len(dropped.bytes_) * APPROX_TOKENS_PER_BYTE)
         log.warning("dropping topic %s (over 50K-token cap)", dropped.topic_id)
-    return kept
+    return overviews + topics
 
 
 def _document_blocks(docs: list[Document]) -> list[dict]:
@@ -222,4 +227,6 @@ def chat_with_documents(
         },
     )
     text = resp["output"]["message"]["content"][0]["text"]
-    return text, [d.topic_id for d in capped], resp.get("usage", {})
+    # Only user-facing topic IDs — the overview doc is an internal
+    # attachment and shouldn't leak into `topics_used` in the response.
+    return text, [d.topic_id for d in capped if not d.is_overview], resp.get("usage", {})
