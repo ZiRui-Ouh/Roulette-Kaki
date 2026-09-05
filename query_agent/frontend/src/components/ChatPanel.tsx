@@ -59,7 +59,12 @@ export default function ChatPanel({ digest }: Props) {
   async function handleSend(customText?: string) {
     const text = (customText || input).trim();
     if (!text || busy) return;
-    const nextTopicId = pendingTopic ?? (digest.topics.length > 0 ? digest.topics[0].topic_id : undefined);
+    // Only forward a topic_id when the user has explicitly picked one via
+    // TopicSelector. Sending digest.topics[0] as a default caused two bugs:
+    // (a) the model got a pre-attached topic unrelated to the question,
+    // and (b) the "topic dropped" banner fired on every turn where the
+    // model chose not to use that arbitrary default.
+    const nextTopicId = pendingTopic ?? undefined;
     setBusy(true);
     setBanner(null);
     setMessages((prev) => [...prev, { role: "user", content: text }]);
@@ -73,6 +78,7 @@ export default function ChatPanel({ digest }: Props) {
         language,
       });
       setSessionId(resp.session_id);
+      const prevTopicIds = topicIds;
       setTopicIds(resp.topics_used);
       setMessages((prev) => [
         ...prev,
@@ -82,8 +88,15 @@ export default function ChatPanel({ digest }: Props) {
           grounded: resp.grounded,
         },
       ]);
+      // Only warn when the user explicitly picked a topic AND it didn't
+      // survive the round-trip — that's the real "eviction" case.
       if (nextTopicId && !resp.topics_used.includes(nextTopicId)) {
-        setBanner("5-topic limit reached; the oldest topic was dropped.");
+        const wasCap = prevTopicIds.length >= 5;
+        setBanner(
+          wasCap
+            ? "5-topic limit reached; the oldest topic was dropped."
+            : `The topic "${topicById.get(nextTopicId)?.title ?? nextTopicId}" wasn't used in this answer.`
+        );
       }
       setPendingTopic(null);
     } catch (e: unknown) {

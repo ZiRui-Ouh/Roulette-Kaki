@@ -7,3 +7,4 @@ __pycache__/
 *.py[cod]
 scripts
 ../../.DS_Store
+tests/

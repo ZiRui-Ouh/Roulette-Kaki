@@ -9,7 +9,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Callable, Literal
 
 try:
     import boto3
@@ -468,3 +468,221 @@ def chat_with_documents(
     # Only user-facing topic IDs — the overview doc is an internal
     # attachment and shouldn't leak into `topics_used` in the response.
     return text, [d.topic_id for d in capped if not d.is_overview], resp.get("usage", {})
+
+
+def _rebuild_first_user_content(
+    docs: list[Document], first_user_text: str
+) -> list[dict]:
+    """Message-0 content array: doc blocks, cachePoint marker, then the
+    original first-user text. Kept identical in shape to
+    `chat_with_documents` so the two paths can't drift."""
+    content: list[dict] = _document_blocks(docs)
+    if docs:
+        content.append({"cachePoint": {"type": "default"}})
+    content.append({"text": first_user_text})
+    return content
+
+
+def chat_with_tools(
+    *,
+    system: str,
+    history: list[dict],
+    user_message: str,
+    initial_docs: list[Document],
+    tool_specs: list[dict],
+    tool_handler: Callable[[str, dict], tuple[dict, list[Document]]],
+    model_id: str = MODEL_NOVA_PRO,
+    max_tokens: int = 1024,
+    max_tool_iters: int = 5,
+) -> tuple[str, list[Document], dict]:
+    """Converse tool-use loop. Returns (final_text, final_doc_set, usage).
+
+    Docs live at message 0. When `tool_handler` returns new docs, we
+    REBUILD message-0's content so subsequent iterations see the fresh
+    doc set. Later messages (assistant tool_use / user toolResult
+    pairs) are appended unchanged. Doc-set changes invalidate the
+    cachePoint prefix for the remainder of the turn — accepted, bounded
+    by `max_tool_iters`.
+
+    `tool_handler(name, input_dict) -> (json_result_for_model, new_docs)`
+      - `json_result_for_model` is wrapped in a toolResult block.
+      - `new_docs` are appended to the running doc list (deduped by
+        topic_id) and spliced into message 0 before the next converse.
+
+    On `max_tool_iters` we force a final `end_turn` call with tools
+    disabled instead of raising — the frontend always gets a
+    ChatResponse.
+    """
+    # Running doc list — mutated across iterations as tool handlers pull
+    # more transcripts. Order matters (message-0 layout is deterministic
+    # per iteration; the cache prefix moves forward as docs get spliced
+    # in).
+    docs: list[Document] = list(initial_docs)
+
+    # Build the initial messages array. Docs+cachePoint sit ahead of the
+    # first user text; if there's chat history the first *history*
+    # message becomes message 0 and the current user_message goes at the
+    # end. This mirrors chat_with_documents so behavior stays consistent.
+    if not history:
+        first_user_text = user_message
+        capped = _cap_documents(docs)
+        messages: list[dict] = [
+            {
+                "role": "user",
+                "content": _rebuild_first_user_content(capped, first_user_text),
+            }
+        ]
+        docs = list(capped)  # keep `docs` in sync with what's actually attached
+    else:
+        assert history[0]["role"] == "user", "history must start with a user message"
+        first_user_text = history[0]["content"]
+        capped = _cap_documents(docs)
+        messages = [
+            {
+                "role": "user",
+                "content": _rebuild_first_user_content(capped, first_user_text),
+            }
+        ]
+        docs = list(capped)
+        for m in history[1:]:
+            messages.append({"role": m["role"], "content": [{"text": m["content"]}]})
+        messages.append({"role": "user", "content": [{"text": user_message}]})
+
+    total_usage: dict = {}
+    final_text = ""
+
+    for iteration in range(max_tool_iters):
+        resp = get_client().converse(
+            modelId=model_id,
+            system=[{"text": system}],
+            messages=messages,
+            toolConfig={"tools": tool_specs},
+            inferenceConfig={
+                "maxTokens": max_tokens,
+                "temperature": 0.3,
+                "topP": 0.9,
+            },
+        )
+        _accumulate_usage(total_usage, resp.get("usage", {}))
+        stop_reason = resp.get("stopReason")
+        out_msg = resp["output"]["message"]
+        log.info(
+            "chat_with_tools: iter=%d stopReason=%s", iteration, stop_reason
+        )
+
+        if stop_reason != "tool_use":
+            final_text = _extract_text(out_msg)
+            return final_text, docs, total_usage
+
+        # tool_use path — the assistant turn goes into the transcript
+        # verbatim (Bedrock requires that the toolResult follow the
+        # exact toolUseId).
+        messages.append(out_msg)
+
+        tool_results: list[dict] = []
+        new_docs_this_iter: list[Document] = []
+        for block in out_msg.get("content", []):
+            if "toolUse" not in block:
+                continue
+            tu = block["toolUse"]
+            name = tu.get("name", "")
+            args = tu.get("input", {}) or {}
+            log.info(
+                "chat_with_tools: iter=%d tool=%s input=%s",
+                iteration, name, args,
+            )
+            try:
+                result_json, added_docs = tool_handler(name, args)
+                status = "success"
+            except Exception as e:  # noqa: BLE001
+                log.warning("tool_handler raised for %s: %s", name, e)
+                result_json = {"status": "error", "error": str(e)}
+                added_docs = []
+                status = "error"
+            tool_results.append(
+                {
+                    "toolResult": {
+                        "toolUseId": tu["toolUseId"],
+                        "content": [{"json": result_json}],
+                        "status": status,
+                    }
+                }
+            )
+            for d in added_docs:
+                if any(existing.topic_id == d.topic_id for existing in docs):
+                    continue
+                new_docs_this_iter.append(d)
+
+        # Fold the tool results into the transcript.
+        messages.append({"role": "user", "content": tool_results})
+
+        # If new docs were attached, rewrite message 0's content so the
+        # NEXT converse iteration sees them.
+        if new_docs_this_iter:
+            docs.extend(new_docs_this_iter)
+            capped = _cap_documents(docs)
+            docs = list(capped)
+            messages[0] = {
+                "role": "user",
+                "content": _rebuild_first_user_content(capped, first_user_text),
+            }
+
+    # Iteration cap hit — coax a final answer. We MUST keep toolConfig on
+    # this call: the transcript already contains toolUse/toolResult blocks
+    # from earlier iterations, and Bedrock rejects the request otherwise
+    # ("toolConfig field must be defined when using toolUse and toolResult
+    # content blocks"). We inject a synthetic user turn asking the model
+    # to stop and answer with what it has.
+    log.warning(
+        "chat_with_tools: hit max_tool_iters=%d — forcing end_turn",
+        max_tool_iters,
+    )
+    messages.append(
+        {
+            "role": "user",
+            "content": [
+                {
+                    "text": (
+                        "You have used the maximum number of tool calls "
+                        "for this turn. Stop calling tools and answer the "
+                        "user's original question now, using only the "
+                        "documents already attached and any tool results "
+                        "above. If the attached documents don't cover "
+                        "it, end with <grounded>false</grounded>."
+                    )
+                }
+            ],
+        }
+    )
+    resp = get_client().converse(
+        modelId=model_id,
+        system=[{"text": system}],
+        messages=messages,
+        toolConfig={"tools": tool_specs},
+        inferenceConfig={
+            "maxTokens": max_tokens,
+            "temperature": 0.3,
+            "topP": 0.9,
+        },
+    )
+    _accumulate_usage(total_usage, resp.get("usage", {}))
+    final_text = _extract_text(resp["output"]["message"])
+    if not final_text:
+        # Model still emitted only toolUse blocks — surface an honest
+        # fallback rather than an empty reply.
+        final_text = (
+            "I wasn't able to reach a final answer after several tool "
+            "calls. Please rephrase or try again. <grounded>false</grounded>"
+        )
+    return final_text, docs, total_usage
+
+
+def _extract_text(message: dict) -> str:
+    parts = [b.get("text", "") for b in message.get("content", []) if "text" in b]
+    return "".join(parts)
+
+
+def _accumulate_usage(total: dict, delta: dict) -> None:
+    for k, v in (delta or {}).items():
+        if isinstance(v, (int, float)):
+            total[k] = total.get(k, 0) + v
