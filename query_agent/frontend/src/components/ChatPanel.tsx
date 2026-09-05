@@ -236,23 +236,25 @@ export default function ChatPanel({ digest, onSaveReplyAsFlashcards }: Props) {
         />
         
         {pendingTopic && (
-          <div className="text-xs text-stone-700 bg-stone-100 border border-stone-200 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2">
-            <span className="truncate text-[11px]">
-              Active context:{" "}
+          <div className="text-xs bg-indigo-50 border-2 border-indigo-300 rounded-lg px-3 py-2 flex items-center justify-between gap-2 shadow-sm">
+            <span className="truncate text-xs text-indigo-900">
+              <span className="font-bold uppercase tracking-wider text-[10px] text-indigo-600 mr-1.5">
+                Grounded on:
+              </span>
               <span className="font-semibold text-stone-900">
                 {truncate(
                   topicById.get(pendingTopic)?.title ?? pendingTopic,
-                  40,
+                  48,
                 )}
               </span>
             </span>
             <button
               onClick={() => setPendingTopic(null)}
-              className="text-stone-400 hover:text-stone-700 p-0.5 cursor-pointer"
+              className="text-indigo-500 hover:text-indigo-800 hover:bg-indigo-100 rounded p-1 cursor-pointer shrink-0 transition"
               title="Cancel"
               aria-label="Cancel selected topic"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         )}

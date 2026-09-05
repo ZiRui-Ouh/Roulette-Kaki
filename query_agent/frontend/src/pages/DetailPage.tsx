@@ -108,7 +108,7 @@ export default function DetailPage() {
         </span>
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(350px,1.2fr)]">
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.9fr)_minmax(400px,1fr)]">
         <div>
           {/* Sitting Masthead */}
           <div className="mb-8">

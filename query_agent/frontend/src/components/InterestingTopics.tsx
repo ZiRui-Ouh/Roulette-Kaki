@@ -1,6 +1,15 @@
 import type { Digest } from "../types";
 import { Lightbulb } from "lucide-react";
 
+function dedupById<T extends { topic_id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((it) => {
+    if (!it.topic_id || seen.has(it.topic_id)) return false;
+    seen.add(it.topic_id);
+    return true;
+  });
+}
+
 export default function InterestingTopics({ digest }: { digest: Digest }) {
   if (!digest.interesting_topics || digest.interesting_topics.length === 0)
     return null;
@@ -16,7 +25,7 @@ export default function InterestingTopics({ digest }: { digest: Digest }) {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {digest.interesting_topics.map((it) => {
+        {dedupById(digest.interesting_topics).map((it) => {
           const topic = byId.get(it.topic_id);
           if (!topic) return null;
           return (
