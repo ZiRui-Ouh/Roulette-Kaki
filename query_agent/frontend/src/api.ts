@@ -3,6 +3,7 @@ import type {
   ChatResponse,
   DebateSummary,
   Digest,
+  Lang,
   Sitting,
 } from "./types";
 
@@ -51,20 +52,26 @@ async function request<T>(
 export interface QueryResponse {
   answer: string;
   session_id: string;
+  language?: Lang;
 }
 
 /**
- * Query Agent API - send policy question to the backend with optional session memory
+ * Query Agent API — send a policy question to the backend with optional
+ * session memory and an optional target language.
+ *
+ * When `language` is non-English the backend translates the question to
+ * English (with a key-points summary), runs the agent, and translates the
+ * response back — see services/translation_wrapper.py.
  */
 export async function askQuery(
   question: string,
+  language: Lang = "English",
   sessionId?: string,
 ): Promise<QueryResponse> {
-  const data = await request<QueryResponse>(QUERY_API_BASE, "/query", {
+  return request<QueryResponse>(QUERY_API_BASE, "/query", {
     method: "POST",
-    body: JSON.stringify({ question, session_id: sessionId }),
+    body: JSON.stringify({ question, language, session_id: sessionId }),
   });
-  return data;
 }
 
 /**
@@ -85,16 +92,25 @@ export function listSittings(
   return request(BLOGPOST_API_BASE, `/sittings?${qs}`);
 }
 
-export function getDigest(date: string): Promise<Digest> {
-  return request(BLOGPOST_API_BASE, `/debates/${encodeURIComponent(date)}`);
+export function getDigest(
+  date: string,
+  language: Lang = "English",
+): Promise<Digest> {
+  const qs = language === "English" ? "" : `?language=${encodeURIComponent(language)}`;
+  return request(BLOGPOST_API_BASE, `/debates/${encodeURIComponent(date)}${qs}`);
 }
 
 export function sendChat(
   date: string,
-  body: { session_id?: string; message: string; topic_id?: string },
+  body: {
+    session_id?: string;
+    message: string;
+    topic_id?: string;
+    language?: Lang;
+  },
 ): Promise<ChatResponse> {
   return request(BLOGPOST_API_BASE, `/debates/${encodeURIComponent(date)}/chat`, {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify({ language: "English", ...body }),
   });
 }

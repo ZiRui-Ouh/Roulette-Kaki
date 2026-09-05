@@ -16,16 +16,15 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from typing import Optional
+from typing import Literal, Optional
 
-<<<<<<< Updated upstream
-=======
-# Ensure default environment configurations before service initialization
+# Set the default environment BEFORE importing services so `storage.py` and
+# friends read the intended values at import time. Clear these for real-AWS /
+# real-scraper mode.
 os.environ.setdefault("USE_LOCAL_STUBS", "1")
 os.environ.setdefault("SCRAPER_MODE", "fixture")
 os.environ.setdefault("YOUTUBE_PLAYLIST", "PLetiU3qG4uSrSjL6UlfVsgR89lxBzP5D1")
 
->>>>>>> Stashed changes
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -35,15 +34,13 @@ from agents import research as research_agent
 from agents.query import answer_question
 from services import sittings as sittings_service
 from services import storage as storage_service
+from services import translation as translation_service
+from services.meralion import MeraLionAuthError, MeraLionError, MeraLionRateLimitError
+from services.translation import TranslationError
+from services.translation_wrapper import is_fast_path, with_translation
 
-<<<<<<< Updated upstream
-# Default environment for local demo. Clear these for real-AWS / real-scraper mode.
-os.environ.setdefault("USE_LOCAL_STUBS", "1")
-os.environ.setdefault("SCRAPER_MODE", "fixture")
-os.environ.setdefault("YOUTUBE_PLAYLIST", "PLetiU3qG4uSrSjL6UlfVsgR89lxBzP5D1")
+Lang = Literal["English", "Chinese", "Malay", "Tamil", "Singlish"]
 
-=======
->>>>>>> Stashed changes
 log = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -82,11 +79,13 @@ class QueryRequest(BaseModel):
     question: str
     urls: list[str] | None = None
     session_id: Optional[str] = None
+    language: Lang = "English"
 
 
 class QueryResponse(BaseModel):
     answer: str
     session_id: str
+    language: Lang = "English"
 
 
 class DebateSummary(BaseModel):
@@ -99,6 +98,24 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     message: str
     topic_id: Optional[str] = None
+    language: Lang = "English"
+
+
+class TranslateRequest(BaseModel):
+    text: str
+    target_language: Lang
+    source_language: Lang = "English"
+
+
+class TranscribeRequest(BaseModel):
+    audio_b64: str
+    mime: str = "audio/wav"
+
+
+class TranslateAudioRequest(BaseModel):
+    audio_b64: str
+    target_language: Lang
+    mime: str = "audio/wav"
 
 
 class ChatResponse(BaseModel):
@@ -117,15 +134,15 @@ def root() -> dict:
         "status": "online",
         "endpoints": [
             "POST /query",
-<<<<<<< Updated upstream
-            "GET  /health",
-=======
             "GET  /query/sessions/{session_id}",
->>>>>>> Stashed changes
+            "GET  /health",
             "GET  /sittings",
             "GET  /debates",
             "GET  /debates/{date}",
             "POST /debates/{date}/chat",
+            "POST /translate",
+            "POST /transcribe",
+            "POST /translate/audio",
             "GET  /docs   (Swagger UI, interactive)",
         ],
     }
@@ -138,26 +155,40 @@ def health() -> dict:
 
 # --- Policy Query Agent ------------------------------------------------------
 
-<<<<<<< Updated upstream
-@app.post("/query")
+@app.post("/query", response_model=QueryResponse)
 def query(q: QueryRequest) -> dict:
     if not q.question or not q.question.strip():
         raise HTTPException(
             status_code=400,
             detail={"error": "empty_question", "message": "question must be non-empty"},
         )
-    answer = answer_question(question=q.question, urls=q.urls)
-    return {"answer": answer}
-=======
-@app.post("/query", response_model=QueryResponse)
-def query(q: QueryRequest):
-    answer, session_id = answer_question(
-        question=q.question,
-        urls=q.urls,
-        session_id=q.session_id,
-        return_session=True,
-    )
-    return {"answer": answer, "session_id": session_id}
+
+    # Capture session_id from inside the translation sandwich so it makes
+    # it back to the client even on the non-English (wrapped) path.
+    captured = {"session_id": q.session_id or ""}
+
+    def _run(english_question: str) -> str:
+        answer, sid = answer_question(
+            question=english_question,
+            urls=q.urls,
+            session_id=q.session_id,
+            return_session=True,
+        )
+        captured["session_id"] = sid
+        return answer
+
+    try:
+        answer = with_translation(q.language, q.question, _run)
+    except TranslationError as e:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "translation_failed", "message": str(e)},
+        )
+    return {
+        "answer": answer,
+        "session_id": captured["session_id"],
+        "language": q.language,
+    }
 
 
 @app.get("/query/sessions/{session_id}")
@@ -166,7 +197,6 @@ def get_query_session(session_id: str):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found or expired")
     return session
->>>>>>> Stashed changes
 
 
 # --- Parliamentary Debate Endpoints ------------------------------------------
@@ -199,7 +229,7 @@ def get_sittings(limit: int = 6, offset: int = 0) -> dict:
 
 
 @app.get("/debates/{date}")
-def get_debate(date: str, refresh: bool = False) -> dict:
+def get_debate(date: str, refresh: bool = False, language: Lang = "English") -> dict:
     try:
         result = digest_agent.run_digest(date, refresh=refresh)
     except NotImplementedError:
@@ -217,35 +247,190 @@ def get_debate(date: str, refresh: bool = False) -> dict:
         }
     if isinstance(result, dict) and result.get("error") == "no_sitting":
         raise HTTPException(status_code=404, detail=result)
+    if not is_fast_path(language) and isinstance(result, dict):
+        try:
+            result = _translate_digest(result, language)
+        except TranslationError as e:
+            raise HTTPException(
+                status_code=502,
+                detail={"error": "translation_failed", "message": str(e)},
+            )
     return result
+
+
+def _translate_digest(digest: dict, language: Lang) -> dict:
+    """Translate user-facing prose fields of a digest to `language`.
+
+    Only `summary` and each `interesting_topics[].reason` are translated.
+    Topic titles and `topics[]` metadata stay English — they're used
+    as citation anchors by the Hansard chat agent downstream and
+    translating them would break that flow.
+    """
+    translated = dict(digest)
+    if digest.get("summary"):
+        translated["summary"] = translation_service.translate_from_english(
+            digest["summary"], language
+        )
+    interesting = digest.get("interesting_topics") or []
+    if interesting:
+        translated_interesting = []
+        for entry in interesting:
+            if not isinstance(entry, dict):
+                translated_interesting.append(entry)
+                continue
+            reason = entry.get("reason")
+            if reason:
+                translated_interesting.append(
+                    {
+                        **entry,
+                        "reason": translation_service.translate_from_english(
+                            reason, language
+                        ),
+                    }
+                )
+            else:
+                translated_interesting.append(entry)
+        translated["interesting_topics"] = translated_interesting
+    translated["language"] = language
+    return translated
 
 
 @app.post("/debates/{date}/chat", response_model=ChatResponse)
 def chat_debate(date: str, req: ChatRequest) -> ChatResponse:
     session_id = req.session_id or str(uuid.uuid4())
+    # Result is populated inside the translation sandwich so that
+    # topics_used / grounded are captured from the ONE agent call whose
+    # answer becomes the (possibly translated) reply.
+    captured: dict = {"topics_used": [], "grounded": False}
+
+    def _run(english_message: str) -> str:
+        try:
+            r = research_agent.run_chat(
+                session_id=session_id,
+                date=date,
+                message=english_message,
+                topic_id=req.topic_id,
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "no_digest_for_date", "message": str(e)},
+            )
+        except NotImplementedError as e:
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "scraper_not_available", "message": str(e)},
+            )
+        captured["topics_used"] = r.topics_used
+        captured["grounded"] = r.grounded
+        return r.reply
+
     try:
-        result = research_agent.run_chat(
-            session_id=session_id,
-            date=date,
-            message=req.message,
-            topic_id=req.topic_id,
-        )
-    except ValueError as e:
-        # e.g. no digest for date — caller must GET /debates/{date} first.
+        reply = with_translation(req.language, req.message, _run)
+    except TranslationError as e:
         raise HTTPException(
-            status_code=400,
-            detail={"error": "no_digest_for_date", "message": str(e)},
-        )
-    except NotImplementedError as e:
-        # Reached scraper.fetch_report in a mode without report bytes
-        # (SCRAPER_MODE=fixture). Tell the caller how to fix it.
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "scraper_not_available", "message": str(e)},
+            status_code=502,
+            detail={"error": "translation_failed", "message": str(e)},
         )
     return ChatResponse(
         session_id=session_id,
-        reply=result.reply,
-        topics_used=result.topics_used,
-        grounded=result.grounded,
+        reply=reply,
+        topics_used=captured["topics_used"],
+        grounded=captured["grounded"],
     )
+
+
+# --- Standalone Translation Endpoints ----------------------------------------
+
+@app.post("/translate")
+def translate_text(req: TranslateRequest) -> dict:
+    if not req.text or not req.text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "empty_text", "message": "text must be non-empty"},
+        )
+    try:
+        if req.source_language == "English":
+            out = translation_service.translate_from_english(
+                req.text, req.target_language
+            )
+        elif req.target_language == "English":
+            out = translation_service.translate_to_english(
+                req.text, req.source_language
+            ).english
+        else:
+            # Two-hop A → English → B keeps the abstraction on Nova and
+            # avoids maintaining N² prompt variants.
+            english = translation_service.translate_to_english(
+                req.text, req.source_language
+            ).english
+            out = translation_service.translate_from_english(
+                english, req.target_language
+            )
+    except TranslationError as e:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "translation_failed", "message": str(e)},
+        )
+    return {"translated_text": out, "target_language": req.target_language}
+
+
+@app.post("/transcribe")
+def transcribe_endpoint(req: TranscribeRequest) -> dict:
+    try:
+        text = translation_service.transcribe_audio(req.audio_b64, mime=req.mime)
+    except MeraLionRateLimitError as e:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "meralion_rate_limit",
+                "message": str(e),
+                "retry_after": e.retry_after,
+            },
+        )
+    except MeraLionAuthError as e:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "meralion_auth_error", "message": str(e)},
+        )
+    except MeraLionError as e:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "meralion_error", "message": str(e)},
+        )
+    return {"transcript": text}
+
+
+@app.post("/translate/audio")
+def translate_audio_endpoint(req: TranslateAudioRequest) -> dict:
+    try:
+        text = translation_service.translate_audio(
+            req.audio_b64,
+            target_language=req.target_language,
+            mime=req.mime,
+        )
+    except TranslationError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "translation_error", "message": str(e)},
+        )
+    except MeraLionRateLimitError as e:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "meralion_rate_limit",
+                "message": str(e),
+                "retry_after": e.retry_after,
+            },
+        )
+    except MeraLionAuthError as e:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "meralion_auth_error", "message": str(e)},
+        )
+    except MeraLionError as e:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "meralion_error", "message": str(e)},
+        )
+    return {"translated_text": text, "target_language": req.target_language}

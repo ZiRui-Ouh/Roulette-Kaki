@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { CATEGORIES } from "../data/policies";
 import type { PolicyCategory } from "../types";
+import LanguageSwitcher from "./LanguageSwitcher";
 
 interface NewsHeaderProps {
   selectedCategory?: PolicyCategory | "All";
@@ -76,14 +77,18 @@ export default function NewsHeader({
             </span>
           </div>
 
-          <div className="flex items-center gap-2 overflow-hidden max-w-full sm:max-w-xl text-[11px]">
-            <span className="bg-red-600 text-white font-bold uppercase tracking-wider px-1.5 py-0.5 rounded text-[9px] flex items-center gap-1 shrink-0">
-              <Flame className="w-2.5 h-2.5" />
-              Gazette Alert
-            </span>
-            <div className="truncate text-stone-300 transition-all duration-300">
-              {breakingAlerts[alertIndex]}
+          <div className="flex items-center gap-3 overflow-hidden max-w-full sm:max-w-2xl text-[11px]">
+            <div className="flex items-center gap-2 overflow-hidden min-w-0">
+              <span className="bg-red-600 text-white font-bold uppercase tracking-wider px-1.5 py-0.5 rounded text-[9px] flex items-center gap-1 shrink-0">
+                <Flame className="w-2.5 h-2.5" />
+                Gazette Alert
+              </span>
+              <div className="truncate text-stone-300 transition-all duration-300">
+                {breakingAlerts[alertIndex]}
+              </div>
             </div>
+            <span className="text-stone-700 hidden sm:inline">|</span>
+            <LanguageSwitcher />
           </div>
         </div>
       </div>

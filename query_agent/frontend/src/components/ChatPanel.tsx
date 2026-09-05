@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { sendChat } from "../api";
 import { loadDebateSession, saveDebateSession } from "../session";
+import { useLanguage } from "../contexts/LanguageContext";
 import type { ChatMessage, Digest } from "../types";
 import TopicSelector from "./TopicSelector";
 import { Sparkles, Bot, AlertCircle, X, Send, ShieldCheck, HelpCircle } from "lucide-react";
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function ChatPanel({ digest }: Props) {
+  const { language } = useLanguage();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [topicIds, setTopicIds] = useState<string[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -19,9 +21,10 @@ export default function ChatPanel({ digest }: Props) {
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
 
-  // Hydrate from localStorage on mount / date change.
+  // Hydrate from the per-language localStorage bucket. Re-runs on
+  // language change so mixed-script threads never appear in one bucket.
   useEffect(() => {
-    const s = loadDebateSession(digest.date);
+    const s = loadDebateSession(digest.date, language);
     if (s) {
       setSessionId(s.session_id);
       setTopicIds(s.topic_ids);
@@ -34,18 +37,22 @@ export default function ChatPanel({ digest }: Props) {
     setPendingTopic(null);
     setBanner(null);
     setInput("");
-  }, [digest.date]);
+  }, [digest.date, language]);
 
-  // Persist on every change.
+  // Persist on every change (per-language bucket).
   useEffect(() => {
     if (sessionId) {
-      saveDebateSession(digest.date, {
-        session_id: sessionId,
-        topic_ids: topicIds,
-        messages,
-      });
+      saveDebateSession(
+        digest.date,
+        {
+          session_id: sessionId,
+          topic_ids: topicIds,
+          messages,
+        },
+        language,
+      );
     }
-  }, [digest.date, sessionId, topicIds, messages]);
+  }, [digest.date, sessionId, topicIds, messages, language]);
 
   const topicById = new Map(digest.topics.map((t) => [t.topic_id, t]));
 
@@ -63,6 +70,7 @@ export default function ChatPanel({ digest }: Props) {
         session_id: sessionId ?? undefined,
         message: text,
         topic_id: nextTopicId,
+        language,
       });
       setSessionId(resp.session_id);
       setTopicIds(resp.topics_used);

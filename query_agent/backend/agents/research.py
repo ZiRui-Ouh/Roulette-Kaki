@@ -288,6 +288,7 @@ def run_chat(
         }
         for m in session.get("chat_history", [])
     ]
+    log.warning("attaching %d docs: %s", len(docs), [(d.topic_id, len(d.bytes_), b"could not be retrieved" in d.bytes_) for d in docs])
     try:
         reply_text, kept_topic_ids, usage = bedrock.chat_with_documents(
             SYSTEM_PROMPT, history, message, docs,

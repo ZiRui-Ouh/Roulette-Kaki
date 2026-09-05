@@ -1,4 +1,4 @@
-import type { ChatMessage } from "./types";
+import type { ChatMessage, Lang } from "./types";
 
 export interface StoredSession {
   session_id: string;
@@ -6,47 +6,66 @@ export interface StoredSession {
   messages: ChatMessage[];
 }
 
-const debateKey = (date: string) => `chat:${date}`;
-const queryChatKey = "query_agent:messages";
+// Chat histories are bucketed per language so a mid-conversation
+// language flip doesn't mix scripts inside the same thread. Existing
+// pre-i18n keys (`chat:{date}`, `query_agent:messages`) are the same as
+// the new English-bucket keys so users don't lose their history.
+const debateKey = (date: string, language: Lang) =>
+  language === "English" ? `chat:${date}` : `chat:${date}:${language}`;
+const queryChatKey = (language: Lang) =>
+  language === "English" ? "query_agent:messages" : `query_agent:messages:${language}`;
 
-export function loadDebateSession(date: string): StoredSession | null {
+export function loadDebateSession(
+  date: string,
+  language: Lang = "English",
+): StoredSession | null {
   try {
-    const raw = localStorage.getItem(debateKey(date));
+    const raw = localStorage.getItem(debateKey(date, language));
     return raw ? (JSON.parse(raw) as StoredSession) : null;
   } catch {
     return null;
   }
 }
 
-export function saveDebateSession(date: string, session: StoredSession): void {
+export function saveDebateSession(
+  date: string,
+  session: StoredSession,
+  language: Lang = "English",
+): void {
   try {
-    localStorage.setItem(debateKey(date), JSON.stringify(session));
+    localStorage.setItem(debateKey(date, language), JSON.stringify(session));
   } catch {
     // Storage disabled or full — ignore.
   }
 }
 
-export function clearDebateSession(date: string): void {
-  localStorage.removeItem(debateKey(date));
+export function clearDebateSession(
+  date: string,
+  language: Lang = "English",
+): void {
+  localStorage.removeItem(debateKey(date, language));
 }
 
-export function loadQueryMessages(): ChatMessage[] {
+export function loadQueryMessages(language: Lang = "English"): ChatMessage[] {
   try {
-    const raw = localStorage.getItem(queryChatKey);
+    const raw = localStorage.getItem(queryChatKey(language));
     return raw ? (JSON.parse(raw) as ChatMessage[]) : [];
   } catch {
     return [];
   }
 }
 
-export function saveQueryMessages(messages: ChatMessage[]): void {
+export function saveQueryMessages(
+  messages: ChatMessage[],
+  language: Lang = "English",
+): void {
   try {
-    localStorage.setItem(queryChatKey, JSON.stringify(messages));
+    localStorage.setItem(queryChatKey(language), JSON.stringify(messages));
   } catch {
     // Storage disabled or full — ignore.
   }
 }
 
-export function clearQueryMessages(): void {
-  localStorage.removeItem(queryChatKey);
+export function clearQueryMessages(language: Lang = "English"): void {
+  localStorage.removeItem(queryChatKey(language));
 }

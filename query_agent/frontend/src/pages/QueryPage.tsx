@@ -3,6 +3,7 @@ import ChatInput from "../components/ChatInput";
 import ChatMessage from "../components/ChatMessage";
 import { askQuery } from "../api";
 import { loadQueryMessages, saveQueryMessages, clearQueryMessages } from "../session";
+import { useLanguage } from "../contexts/LanguageContext";
 import type { ChatMessage as ChatMessageType } from "../types";
 import {
   Sparkles,
@@ -39,28 +40,29 @@ const SUGGESTED_TOPICS = [
 ];
 
 export default function QueryPage() {
+  const { language } = useLanguage();
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
-  // Hydrate messages from localStorage
+  // Hydrate messages from the per-language localStorage bucket.
+  // Re-runs when the user flips languages so each bucket shows its own
+  // history (no cross-script mixing inside a single thread).
   useEffect(() => {
-    const saved = loadQueryMessages();
-    if (saved.length > 0) {
-      setMessages(saved);
-    }
-  }, []);
+    setMessages(loadQueryMessages(language));
+    setErrorBanner(null);
+  }, [language]);
 
-  // Save messages to localStorage on update
+  // Save messages to the per-language bucket on update.
   useEffect(() => {
     if (messages.length > 0) {
-      saveQueryMessages(messages);
+      saveQueryMessages(messages, language);
     }
-  }, [messages]);
+  }, [messages, language]);
 
   const handleClearHistory = () => {
-    clearQueryMessages();
+    clearQueryMessages(language);
     setMessages([]);
     setSessionId(null);
     setErrorBanner(null);
@@ -78,7 +80,7 @@ export default function QueryPage() {
     setErrorBanner(null);
 
     try {
-      const res = await askQuery(question, sessionId || undefined);
+      const res = await askQuery(question, language, sessionId || undefined);
 
       if (res.session_id) {
         setSessionId(res.session_id);

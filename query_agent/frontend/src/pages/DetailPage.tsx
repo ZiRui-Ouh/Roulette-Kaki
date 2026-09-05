@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getDigest } from "../api";
+import { useLanguage } from "../contexts/LanguageContext";
 import type { Digest } from "../types";
 import ChatPanel from "../components/ChatPanel";
 import DigestSummary from "../components/DigestSummary";
 import InterestingTopics from "../components/InterestingTopics";
 import TopicList from "../components/TopicList";
-import { ArrowLeft, RefreshCw, Calendar, AlertCircle } from "lucide-react";
+import YoutubeThumbnail from "../components/YoutubeThumbnail";
+import { ArrowLeft, RefreshCw, Calendar, AlertCircle, Play, Video, FileText } from "lucide-react";
 
 export default function DetailPage() {
   const { date } = useParams<{ date: string }>();
+  const { language } = useLanguage();
   const [digest, setDigest] = useState<Digest | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,7 +21,7 @@ export default function DetailPage() {
     let cancelled = false;
     setDigest(null);
     setError(null);
-    getDigest(date)
+    getDigest(date, language)
       .then((d) => {
         if (!cancelled) setDigest(d);
       })
@@ -34,7 +37,7 @@ export default function DetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [date]);
+  }, [date, language]);
 
   if (error) {
     return (
@@ -98,7 +101,9 @@ export default function DetailPage() {
             </p>
           </div>
 
-          {digest.youtube_url && <YouTubeEmbed url={digest.youtube_url} />}
+          {digest.youtube_url && (
+            <YouTubeWatchCard url={digest.youtube_url} title={digest.title} date={digest.date} />
+          )}
           <DigestSummary digest={digest} />
           <InterestingTopics digest={digest} />
           <TopicList topics={digest.topics} />
@@ -113,25 +118,63 @@ export default function DetailPage() {
   );
 }
 
-function YouTubeEmbed({ url }: { url: string }) {
+// Parliament channel disables cross-site embedding, so the iframe path
+// renders an unplayable "video unavailable" state. Instead, mirror the
+// FeedPage latest-sitting spotlight: show a clickable thumbnail that
+// opens the YouTube watch page in a new tab.
+function YouTubeWatchCard({ url, title, date }: { url: string; title: string; date: string }) {
   const id = extractYoutubeId(url);
   if (!id) return null;
   return (
-    <div className="aspect-video mb-8 rounded-2xl overflow-hidden bg-black shadow-md border border-stone-300">
-      <iframe
-        className="w-full h-full"
-        src={`https://www.youtube.com/embed/${id}`}
-        title="Sitting livestream"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-        allowFullScreen
+    <div className="mb-8">
+      <YoutubeThumbnail
+        videoId={id}
+        alt={title}
+        imgClassName="w-full h-full object-cover group-hover:scale-105 transition duration-500 opacity-90"
+        renderReady={(img) => (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Watch on YouTube: ${title}`}
+            className="group relative block rounded-2xl overflow-hidden bg-stone-900 aspect-video border border-stone-300 shadow-md cursor-pointer"
+          >
+            {img}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-16 h-16 rounded-full bg-red-600/95 flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:bg-red-600 transition duration-300">
+                <Play className="w-7 h-7 text-white fill-white translate-x-0.5" />
+              </div>
+            </div>
+            <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white text-xs">
+              <span className="bg-red-600 px-2 py-0.5 rounded font-bold uppercase text-[10px] tracking-wider flex items-center gap-1">
+                <Video className="w-3 h-3" />
+                Watch on YouTube
+              </span>
+              <span className="text-[11px] text-stone-300">{date}</span>
+            </div>
+          </a>
+        )}
+        fallback={
+          <div className="relative rounded-2xl overflow-hidden bg-stone-100 aspect-video border border-stone-300 shadow-inner flex items-center justify-center mb-8">
+            <div className="text-center text-stone-500 px-4">
+              <FileText className="w-6 h-6 text-stone-500 mx-auto mb-2" />
+              <div className="text-xs font-semibold">Hansard Official Record</div>
+              <div className="text-[10px] text-stone-400 mt-0.5">Video preview unavailable</div>
+            </div>
+          </div>
+        }
       />
     </div>
   );
 }
 
 function extractYoutubeId(url: string): string | null {
+  // 11-char YouTube video ID with a `(?![\w-])` trailing lookahead so
+  // longer stub IDs like "fixture-sitting-20260805" don't match their
+  // leading 11 chars and produce a broken thumbnail URL.
   const m = url.match(
-    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/))([\w-]{11})/,
+    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/))([\w-]{11})(?![\w-])/,
   );
   return m ? m[1] : null;
 }

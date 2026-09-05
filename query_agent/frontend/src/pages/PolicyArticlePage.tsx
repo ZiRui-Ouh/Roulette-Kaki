@@ -20,11 +20,13 @@ import {
 } from "lucide-react";
 import { POLICIES } from "../data/policies";
 import { askQuery } from "../api";
+import { useLanguage } from "../contexts/LanguageContext";
 import type { ChatMessage } from "../types";
 
 export default function PolicyArticlePage() {
   const { id } = useParams<{ id: string }>();
   const policy = POLICIES.find((p) => p.id === id);
+  const { language } = useLanguage();
 
   // Chat conversation state for this policy
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -75,7 +77,7 @@ export default function PolicyArticlePage() {
     try {
       // Prime the question with policy context if appropriate
       const contextualQuestion = `Regarding the Singapore policy "${policy.title}" (${policy.ministry}): ${queryText}`;
-      const res = await askQuery(contextualQuestion, sessionId || undefined);
+      const res = await askQuery(contextualQuestion, language, sessionId || undefined);
 
       if (res.session_id) {
         setSessionId(res.session_id);

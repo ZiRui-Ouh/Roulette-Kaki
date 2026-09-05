@@ -1,3 +1,18 @@
+export type Lang =
+  | "English"
+  | "Chinese"
+  | "Malay"
+  | "Tamil"
+  | "Singlish";
+
+export const LANGUAGES: { code: Lang; label: string }[] = [
+  { code: "English", label: "English" },
+  { code: "Chinese", label: "中文" },
+  { code: "Malay", label: "Bahasa Melayu" },
+  { code: "Tamil", label: "தமிழ்" },
+  { code: "Singlish", label: "Singlish" },
+];
+
 export interface DebateSummary {
   date: string;
   title: string;
