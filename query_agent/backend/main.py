@@ -132,6 +132,7 @@ def root() -> dict:
     return {
         "service": "Singapore Policy & Parliamentary Intelligence API",
         "status": "online",
+        "search_agent_integrated": True,
         "endpoints": [
             "POST /query",
             "GET  /query/sessions/{session_id}",

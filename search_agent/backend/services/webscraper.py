@@ -618,11 +618,11 @@ def classify_intent(query: str, conversation_context: list[dict] | None = None) 
         return "COMPARISON"
 
     # 4. User Experience (waiting times, personal experiences)
-    if re.search(r"\b(how\s+long\s+(do|are)\s+people|waiting\s+times?|experiences?|what\s+is\s+it\s+like|personal\s+stories|reviews?|applying\s+experience|buying\s+experience|how\s+was\s+your)\b", q_lower):
+    if re.search(r"\b(how\s+long\s+(do|are)\s+people|waiting\s+times?|experiences?|what\s+is\s+it\s+like|personal\s+stories|reviews?|applying\s+experience|buying\s+experience|how\s+was\s+your|people's\s+experiences?)\b", q_lower):
         return "USER_EXPERIENCE"
 
-    # 5. Public Opinion
-    if re.search(r"\b(opinions?|what\s+do\s+people\s+think|what\s+people\s+think|sentiments?|thoughts\s+on|how\s+do\s+people\s+feel|public\s+view|public\s+opinion|feedback\s+on|reactions?\s+to)\b", q_lower):
+    # 5. Public Opinion & Community Sentiment
+    if re.search(r"\b(opinions?|what\s+do\s+people\s+think|what\s+people\s+think|sentiments?|thoughts\s+on|how\s+do\s+people\s+feel|public\s+view|public\s+opinion|feedback\s+on|reactions?\s+to|what\s+are\s+singaporeans\s+saying|what\s+are\s+people\s+saying|is\s+[\w\s-]+\s+worth\s+it|worth\s+it|what\s+do\s+reddit\s+users\s+think|reddit\s+users?\s+think|community\s+opinions?|community\s+sentiment|public\s+discussion)\b", q_lower):
         return "PUBLIC_OPINION"
 
     # 6. Eligibility & Criteria
@@ -916,32 +916,51 @@ def generate_search_queries(query: str, intent: dict[str, Any]) -> dict[str, lis
     if is_opinion or resolved_intent in ("PUBLIC_OPINION", "USER_EXPERIENCE", "PROS_CONS"):
         if "bto" in clean_q.lower() or housing_type == "bto":
             if "couple" in clean_q.lower() or demographic == "families":
-                community_queries.append("Singapore BTO couples opinions")
-                community_queries.append("Singapore BTO couples experiences")
-                community_queries.append("Singapore BTO couples Reddit")
-                community_queries.append("Singapore BTO couples HardwareZone")
-                community_queries.append("couples applying for BTO Singapore")
-                community_queries.append("BTO experience couples Singapore")
+                community_queries.extend([
+                    "BTO Singapore opinions couples",
+                    "BTO Singapore experience couples",
+                    "BTO Singapore Reddit couples",
+                    "BTO Singapore HardwareZone couples",
+                    "BTO ballot experience couples Singapore",
+                    "BTO waiting time Singapore couples",
+                ])
             elif "single" in clean_q.lower() or demographic == "singles":
-                community_queries.append("Singapore BTO singles opinions")
-                community_queries.append("Singapore BTO singles experiences reddit")
-                community_queries.append("Singapore BTO singles HardwareZone")
+                community_queries.extend([
+                    "BTO Singapore opinions singles",
+                    "BTO Singapore experience singles reddit",
+                    "BTO Singapore HardwareZone singles",
+                    "BTO waiting time singles Singapore",
+                ])
             else:
-                community_queries.append("Singapore BTO opinions discussions")
-                community_queries.append("Singapore BTO waiting times ballot opinions")
-                community_queries.append("Singapore BTO experiences reddit")
-                community_queries.append("Singapore BTO pros and cons reddit")
-                community_queries.append("Singapore BTO hardwarezone")
-            official_queries.append("HDB BTO flat schemes and information site:hdb.gov.sg")
-            official_queries.append(f"{clean_q} site:gov.sg")
+                community_queries.extend([
+                    "BTO Singapore opinions",
+                    "BTO Singapore experience",
+                    "BTO Singapore Reddit",
+                    "BTO worth it Singapore",
+                    "BTO ballot experience Singapore",
+                    "BTO affordability Singapore",
+                    "BTO waiting time Singapore",
+                    "BTO HardwareZone Singapore",
+                ])
+            if any(k in clean_q.lower() for k in ["income ceiling", "grant", "payout", "eligibility", "ceiling"]):
+                official_queries.append("HDB BTO eligibility and income ceiling site:hdb.gov.sg")
         elif "cpf" in clean_q.lower() or domain == "cpf":
-            community_queries.append("Singapore CPF public opinions reddit")
-            community_queries.append("Singapore CPF discussion hardwarezone")
-            official_queries.append("CPF Board interest rates and policies site:cpf.gov.sg")
+            community_queries.extend([
+                "CPF Singapore opinions reddit",
+                "CPF Singapore discussion hardwarezone",
+                "CPF interest rate opinions Singapore reddit",
+                "CPF SA closure public opinions reddit hardwarezone",
+            ])
+            if any(k in clean_q.lower() for k in ["interest rate", "rate", "closure", "rule", "amount"]):
+                official_queries.append("CPF Board official interest rates and policies site:cpf.gov.sg")
         else:
-            community_queries.append(f"{clean_q} reddit")
-            community_queries.append(f"{clean_q} hardwarezone")
-            official_queries.append(f"{clean_q} site:gov.sg")
+            community_queries.extend([
+                f"{clean_q} opinions reddit",
+                f"{clean_q} experience reddit singapore",
+                f"{clean_q} hardwarezone",
+            ])
+            if any(k in clean_q.lower() for k in ["income ceiling", "eligibility", "rate", "amount", "quantum"]):
+                official_queries.append(f"{clean_q} site:gov.sg")
 
     # 2. Comparison Routing
     elif resolved_intent == "COMPARISON":
@@ -1753,11 +1772,26 @@ def rank_sources(sources: list[dict], intent: Optional[dict[str, Any]] = None, q
         is_opinion = intent.get("is_opinion_or_sentiment", False)
         total_score = 0.0
         if is_opinion:
-            # Community sources prioritized for opinion/sentiment inquiries
+            # Section 42: Community sources ranked primarily
             if not s.get("is_official", False):
-                total_score += 1000.0
+                total_score += 2000.0
+                # Discussion relevance
+                content_sample = (s.get("title", "") + " " + s.get("text", "")[:3000]).lower()
+                discussion_indicators = ["opinion", "think", "experience", "waiting", "ballot", "worth", "frustrat", "discuss", "sentiment", "delay", "forum", "reddit", "hardwarezone", "pros", "cons", "advice"]
+                disc_matches = sum(1 for w in discussion_indicators if w in content_sample)
+                total_score += min(500.0, disc_matches * 50.0)
+                # Quality / substance of discussion
+                clean_len = len(s.get("text", "").strip())
+                if clean_len > 500:
+                    total_score += 200.0
+                total_score += s["relevance_score"] * 300.0
+                total_score += calculate_recency_score(s) * 100.0
             else:
-                total_score += 200.0
+                # An official page should score extremely low for an opinion question
+                total_score -= 1000.0
+                content_lower = (s.get("title", "") + " " + s.get("text", "")[:1000]).lower()
+                if any(w in content_lower for w in ["priority scheme", "income ceiling", "eligibility condition", "core nucleus"]):
+                    total_score -= 500.0
         else:
             # Official sources prioritized for factual policy / eligibility inquiries
             if s.get("is_official", False):
@@ -1765,9 +1799,9 @@ def rank_sources(sources: list[dict], intent: Optional[dict[str, Any]] = None, q
             else:
                 total_score += 200.0
 
-        total_score += s["applicability_score"] * 500.0
-        total_score += s["relevance_score"] * 200.0
-        total_score += calculate_recency_score(s) * 100.0
+            total_score += s["applicability_score"] * 500.0
+            total_score += s["relevance_score"] * 200.0
+            total_score += calculate_recency_score(s) * 100.0
 
         s["_rank_score"] = total_score
 
@@ -1788,14 +1822,13 @@ def detect_policy_version_and_conflicts(
     - conflicting_sources: Older or alternative sources that contain superseded figures.
     """
     is_opinion = intent.get("is_opinion_or_sentiment", False)
+    if is_opinion:
+        # Section 39 & 40: Do NOT substitute an official government page for community opinion
+        return None, []
+
     official_sources = [s for s in sources if s.get("is_official", False)]
     if not official_sources:
         return None, []
-
-    # If the user asked an opinion question, do not designate an official income ceiling source as primary
-    if is_opinion and official_sources:
-        if official_sources[0].get("applicability_score", 0) < 0.35:
-            return None, []
 
     current_applicable = official_sources[0]
     conflicts: list[dict] = []
@@ -2259,6 +2292,7 @@ def extract_structured_policy_facts(
 def build_search_intelligence(
     user_query: str,
     conversation_context: list[dict] | None = None,
+    include_official: bool = True,
     include_unofficial: bool = True,
 ) -> dict[str, Any]:
     """
@@ -2285,29 +2319,37 @@ def build_search_intelligence(
     debug_trace.generated_search_queries = []
 
     effective_query = intent.get("effective_query") or intent.get("rewritten_query") or user_query
+    is_opinion = intent.get("is_opinion_or_sentiment", False) or intent.get("resolved_intent") in ("PUBLIC_OPINION", "USER_EXPERIENCE", "PROS_CONS")
+
+    # If pure opinion inquiry without explicit request for official facts, don't scrape official pages
+    actual_include_official = include_official and not (is_opinion and not any(k in effective_query.lower() for k in ["ceiling", "income ceiling", "grant", "payout", "eligibility", "rule"]))
 
     official_sources: list[dict] = []
     unofficial_sources: list[dict] = []
 
-    # Parallel retrieval of official and unofficial intelligence
-    if include_unofficial:
+    # Dynamic retrieval of official and unofficial intelligence
+    if actual_include_official and include_unofficial:
         with ThreadPoolExecutor(max_workers=2) as executor:
             fut_off = executor.submit(scrape_official_sources, effective_query, intent, debug_trace)
             fut_unoff = executor.submit(scrape_unofficial_sources, effective_query, intent, debug_trace)
             official_sources = fut_off.result()
             unofficial_sources = fut_unoff.result()
-    else:
+    elif actual_include_official:
         official_sources = scrape_official_sources(effective_query, intent, debug_trace)
+    elif include_unofficial:
+        unofficial_sources = scrape_unofficial_sources(effective_query, intent, debug_trace)
 
     # Rank all sources
-    official_ranked = rank_sources(official_sources, intent=intent, query=effective_query)
-    unofficial_ranked = rank_sources(unofficial_sources, intent=intent, query=effective_query)
+    official_ranked = rank_sources(official_sources, intent=intent, query=effective_query) if official_sources else []
+    unofficial_ranked = rank_sources(unofficial_sources, intent=intent, query=effective_query) if unofficial_sources else []
 
-    # Detect current applicable source and version conflicts
-    current_applicable, conflicts = detect_policy_version_and_conflicts(official_ranked, intent=intent)
+    # Detect current applicable source and version conflicts (Section 39 & 40: suppressed for opinion intent)
+    current_applicable, conflicts = (None, []) if is_opinion else detect_policy_version_and_conflicts(official_ranked, intent=intent)
 
-    # Extract structured numerical policy facts
-    policy_facts = extract_structured_policy_facts(official_ranked, intent=intent, query=effective_query)
+    # Extract structured numerical policy facts only for factual inquiries
+    policy_facts = []
+    if not is_opinion and official_ranked:
+        policy_facts = extract_structured_policy_facts(official_ranked, intent=intent, query=effective_query)
     debug_trace.extracted_facts = policy_facts
 
     # If structured facts found and relevant to target demographic, update relevant_excerpt on applicable source

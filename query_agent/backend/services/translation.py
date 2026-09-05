@@ -92,13 +92,17 @@ def translate_to_english(text: str, source_language: str) -> TranslatedInput:
         f"Source language: {source_language}\n"
         f"Source text:\n{text}"
     )
-    raw = bedrock.ask_nova(prompt, max_tokens=1024).strip()
-    obj = _extract_json_object(raw)
-    english = str(obj.get("english", "")).strip()
-    key_points = str(obj.get("key_points", "")).strip()
-    if not english:
-        raise TranslationError("translator returned empty english field")
-    return TranslatedInput(english=english, key_points=key_points)
+    try:
+        raw = bedrock.ask_nova(prompt, max_tokens=1024).strip()
+        obj = _extract_json_object(raw)
+        english = str(obj.get("english", "")).strip()
+        key_points = str(obj.get("key_points", "")).strip()
+        if not english:
+            return TranslatedInput(english=text.strip(), key_points="")
+        return TranslatedInput(english=english, key_points=key_points)
+    except Exception as exc:
+        log.warning("translate_to_english fallback due to error: %s", exc)
+        return TranslatedInput(english=text.strip(), key_points="")
 
 
 def translate_from_english(text: str, target_language: str) -> str:
@@ -108,13 +112,16 @@ def translate_from_english(text: str, target_language: str) -> str:
     if target_language == "English":
         return text
     if target_language not in SUPPORTED_LANGUAGES:
-        raise TranslationError(f"unsupported target_language: {target_language!r}")
+        return text
 
     system = _FROM_ENGLISH_SYSTEM.format(target=target_language)
     prompt = f"{system}\n\nEnglish text to translate:\n{text}"
-    # Give Nova enough headroom for long-form policy replies; Nova Lite
-    # will stop naturally when it's done.
-    return bedrock.ask_nova(prompt, max_tokens=2048).strip()
+    try:
+        translated = bedrock.ask_nova(prompt, max_tokens=2048).strip()
+        return translated if translated else text
+    except Exception as exc:
+        log.warning("translate_from_english fallback due to error: %s", exc)
+        return text
 
 
 # --- Audio (MERaLiON) --------------------------------------------------------

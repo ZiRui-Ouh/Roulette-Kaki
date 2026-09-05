@@ -1,12 +1,20 @@
 import logging
+import os
 import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from services.bedrock import ask_nova
-from services.search_service import fetch_from_search_agent
+from services.bedrock import ask_nova, converse_with_tools
+from services.search_service import (
+    fetch_from_search_agent,
+    get_search_policy_tool_spec,
+    execute_search_policy,
+)
 from services import storage
+from agents.main_agent import create_search_plan
+from services.verification import verify_evidence
+from schemas import MainAgentPlan
 
 log = logging.getLogger(__name__)
 
@@ -187,13 +195,14 @@ def build_prompt(
     query_intent: str = "GENERAL_INFORMATION",
     rewritten_query: str | None = None,
     official_facts: list[dict] | None = None,
+    time_scope: str = "current",
 ) -> str:
 
     now_utc = datetime.now(timezone.utc)
     current_date_str = now_utc.strftime("%B %Y")
     current_year = now_utc.year
 
-    is_opinion = query_intent in ("PUBLIC_OPINION", "USER_EXPERIENCE", "PROS_CONS")
+    is_opinion = str(query_intent).lower() in ("public_opinion", "user_experience", "pros_cons")
     base_prompt = OPINION_AGENT_PROMPT if is_opinion else QUERY_AGENT_PROMPT
 
     official_text = ""
@@ -337,6 +346,26 @@ CONSISTENCY CHECK BEFORE WRITING:
 
 Return only the concise final answer in the specified format.
 """
+    elif time_scope == "historical":
+        task_section = """
+==================================================
+TASK
+==================================================
+
+Answer the user's question about the HISTORICAL / PREVIOUS policy figure or rule (prior to subsequent changes).
+
+CONSISTENCY CHECK BEFORE WRITING:
+1. State the PREVIOUS/HISTORICAL figure affirmatively in the Core Answer and Key Conditions/Figures (e.g. $7,000 for singles, or $14,000 for families prior to the revision).
+2. Note briefly when it was subsequently revised.
+3. Under Key Conditions/Figures, output EXACTLY three concise lines:
+   - Category: <demographic, e.g. singles>
+   - Exact official figure or percentage: <historical numerical figure, e.g. $7,000>
+   - Applicable date: <historical timeframe, e.g. Prior to 24 August 2026>
+   Do NOT paste raw excerpt paragraphs or long sentences into Key Conditions/Figures.
+4. Under Official Source, cite the official source title and URL.
+
+Return only the concise final answer in the specified format.
+"""
     else:
         task_section = """
 ==================================================
@@ -428,12 +457,15 @@ def _validate_consistency(
         return None
 
     # Check for intent mismatch on opinion questions
-    if query_intent in ("PUBLIC_OPINION", "USER_EXPERIENCE", "PROS_CONS"):
-        if re.search(r"\b(gross monthly household income ceiling|income ceiling for 2-room flexi is \$8,000|income ceiling of \$8,000)\b", answer, re.IGNORECASE):
-            return "Intent Mismatch: The response provided an administrative income ceiling figure instead of discussing public opinions, experiences, or sentiment."
+    is_opinion = str(query_intent).lower() in ("public_opinion", "user_experience", "pros_cons")
+    if is_opinion:
+        if re.search(r"\b(gross monthly household income ceiling|income ceiling for 2-room flexi is \$8,000|income ceiling of \$8,000|income ceiling|priority schemes?|core nucleus|resale levy)\b", answer, re.IGNORECASE) and not any(w in answer.lower() for w in ["waiting time", "ballot", "sentiment", "discussions", "opinions", "reddit", "hardwarezone", "commenters", "users", "concern"]):
+            return "Intent Mismatch: The response provided an administrative policy or scheme instead of discussing public opinions, experiences, or sentiment."
+        if "Official Source:" in answer and "Key Conditions/Figures:" in answer and not any(w in answer.lower() for w in ["sentiment", "opinion", "themes", "discussions", "waiting time", "ballot", "frustrat", "experiences"]):
+            return "Intent Mismatch: The response adopted a purely official policy format instead of summarizing community sentiment."
 
     # Check for missing numerical figure line when official facts are present
-    if official_facts and query_intent not in ("PUBLIC_OPINION", "USER_EXPERIENCE", "PROS_CONS"):
+    if official_facts and not is_opinion:
         primary_fact = official_facts[0]
         val = primary_fact.get("value")
         cat = primary_fact.get("category")
@@ -528,94 +560,243 @@ def answer_question(
     session = storage.get_session(current_session_id) or _new_session(current_session_id)
     chat_history = session.get("chat_history", [])
 
+    router_mode = os.environ.get("ROUTER_MODE", "llm").lower()
+    MAX_TOOL_ITERATIONS = 3
+
     curated_official = list(official_sources or [])
     curated_unofficial = list(unofficial_sources or [])
     synth_data = search_agent_data
-
     current_applicable = None
-    conflicts = []
-    query_intent = "GENERAL_INFORMATION"
-    rewritten_query = question
+    conflicts: list[dict] = []
+    official_facts: list[dict] = []
+    answer = ""
 
-    # IMPORTANT:
-    # Always call the Search Agent when search is enabled, forwarding conversation context
-    if enable_search:
+    if router_mode == "regex":
+        log.info("[ROUTER_MODE=regex] Running legacy deterministic flow")
+        plan = create_search_plan(question, conversation_context=chat_history)
+        need_official = "official_search" in plan.agents_to_invoke
+        need_community = "community_search" in plan.agents_to_invoke
+        need_verification = "verification" in plan.agents_to_invoke
 
-        search_result = fetch_from_search_agent(
-            question=question,
-            urls=urls,
-            provided_sources=None,
-            conversation_context=chat_history,
+        if enable_search:
+            search_result = fetch_from_search_agent(
+                question=plan.resolved_query or question,
+                urls=urls,
+                provided_sources=None,
+                conversation_context=chat_history,
+                need_official=need_official,
+                need_community=need_community,
+                official_queries=plan.search_queries.official,
+                community_queries=plan.search_queries.community,
+                plan_dict=plan.model_dump(),
+            )
+            for src in search_result.get("official_sources", []):
+                if src not in curated_official:
+                    curated_official.append(src)
+            for src in search_result.get("unofficial_sources", []):
+                if src not in curated_unofficial:
+                    curated_unofficial.append(src)
+            new_synthesis = search_result.get("search_summary")
+            if new_synthesis:
+                synth_data = new_synthesis
+
+        if need_verification and (curated_official or curated_unofficial):
+            verification_result = verify_evidence(
+                official_sources=curated_official,
+                unofficial_sources=curated_unofficial,
+                plan=plan,
+            )
+            current_applicable = verification_result.primary_source
+            conflicts = verification_result.conflicts
+            facts_to_use = (
+                verification_result.historical_facts
+                if plan.time_scope == "historical"
+                else (verification_result.current_facts or verification_result.historical_facts)
+            )
+            official_facts = [f.model_dump() for f in facts_to_use]
+            if current_applicable:
+                curated_official = [current_applicable] + [
+                    s for s in curated_official if s.get("url") != current_applicable.get("url")
+                ]
+
+        prompt = build_prompt(
+            question=plan.resolved_query or question,
+            official_sources=curated_official,
+            unofficial_sources=curated_unofficial,
+            search_agent_data=synth_data,
+            chat_history=chat_history,
+            current_applicable_source=current_applicable,
+            conflicting_sources=conflicts,
+            query_intent=plan.intent,
+            rewritten_query=plan.resolved_query,
+            official_facts=official_facts,
+            time_scope=plan.time_scope,
         )
+        answer = ask_nova(prompt, max_tokens=1024)
 
-        query_intent = search_result.get("query_intent", "GENERAL_INFORMATION")
-        rewritten_query = search_result.get("rewritten_query", question)
-        current_applicable = search_result.get("current_applicable_source")
-        conflicts = search_result.get("conflicting_sources", [])
+    else:
+        # ROUTER_MODE=llm or ROUTER_MODE=shadow (genuinely model-driven agentic loop)
+        if router_mode == "shadow":
+            try:
+                shadow_plan = create_search_plan(question, conversation_context=chat_history)
+                log.info(
+                    "[SHADOW MODE] Deterministic comparison: intent=%s, target=%s, queries=%s",
+                    shadow_plan.intent,
+                    shadow_plan.target,
+                    shadow_plan.search_queries.official,
+                )
+            except Exception as shadow_err:
+                log.warning("[SHADOW MODE] Deterministic comparator failed: %s", shadow_err)
 
-        for src in search_result.get("official_sources", []):
-            if src not in curated_official:
-                curated_official.append(src)
+        is_opinion_q = bool(
+            re.search(
+                r"\b(opinions?|public\s+opinions?|what\s+do\s+people\s+think|what\s+people\s+think|sentiments?|thoughts\s+on|"
+                r"how\s+do\s+people\s+feel|public\s+view|feedback\s+on|reactions?\s+to|what\s+are\s+singaporeans\s+saying|"
+                r"what\s+are\s+people\s+saying|experiences?|is\s+[\w\s-]+\s+worth\s+it|worth\s+it|what\s+do\s+reddit\s+users\s+think|"
+                r"reddit|hardwarezone|pros\s+and\s+cons|trade-?offs)\b",
+                question.lower(),
+            )
+        )
+        active_system_prompt = OPINION_AGENT_PROMPT if is_opinion_q else QUERY_AGENT_PROMPT
 
-        # Place the primary applicable source at index 0
-        if current_applicable:
-            curated_official = [current_applicable] + [
-                s for s in curated_official if s.get("url") != current_applicable.get("url")
-            ]
+        user_prompt = f"USER QUESTION: {question}\n"
+        if chat_history:
+            user_prompt += "CONVERSATION CONTEXT (PREVIOUS TURNS):\n"
+            for turn in chat_history[-4:]:
+                user_prompt += f"{turn['role'].upper()}: {turn['content']}\n"
 
-        for src in search_result.get("unofficial_sources", []):
-            if src not in curated_unofficial:
-                curated_unofficial.append(src)
+        messages = [{"role": "user", "content": [{"text": user_prompt}]}]
+        tools = [get_search_policy_tool_spec()]
+        last_tool_input: dict = {}
+        last_evidence: dict = {}
 
-        # Always use the latest Search Agent synthesis returned
-        # by the current search.
-        new_synthesis = search_result.get("search_summary")
-        if new_synthesis:
-            synth_data = new_synthesis
+        for iteration in range(MAX_TOOL_ITERATIONS):
+            log.info("Agentic Loop Iteration %d / %d", iteration + 1, MAX_TOOL_ITERATIONS)
+            if last_tool_input.get("fact_type") in ("public_opinion", "pros_cons") or is_opinion_q:
+                active_system_prompt = OPINION_AGENT_PROMPT
 
-        official_facts = search_result.get("official_policy_facts", [])
-        debug_trace = search_result.get("debug_trace")
+            resp = converse_with_tools(
+                messages=messages,
+                tools=tools,
+                system_prompt=active_system_prompt,
+            )
 
-    prompt = build_prompt(
-        question=rewritten_query or question,
-        official_sources=curated_official,
-        unofficial_sources=curated_unofficial,
-        search_agent_data=synth_data,
-        chat_history=chat_history,
-        current_applicable_source=current_applicable,
-        conflicting_sources=conflicts,
-        query_intent=query_intent,
-        rewritten_query=rewritten_query,
-        official_facts=official_facts,
-    )
+            if resp.get("stop_reason") == "tool_use" and resp.get("tool_calls"):
+                for call in resp["tool_calls"]:
+                    tool_name = call["name"]
+                    tool_input = call["input"]
+                    last_tool_input = tool_input
 
-    if debug_trace:
-        debug_trace.data_passed_to_query_agent = {
-            "question": rewritten_query or question,
-            "curated_official_count": len(curated_official),
-            "official_facts": official_facts,
-            "current_applicable_source": current_applicable.get("url") if current_applicable else None,
-            "search_agent_synthesis_preview": (synth_data or "")[:300],
-        }
-        debug_trace.final_nova_prompt = prompt
-        debug_trace.emit()
+                    log.info(
+                        "\n==================================================\n"
+                        "USER:\n%s\n\n"
+                        "AGENT DECISION:\nNeed external search: official=%s, community=%s\n\n"
+                        "TOOL CALL: %s\n"
+                        "Target: %s | Topic: %s | Fact Type: %s | Time: %s\n"
+                        "Official Queries: %s\n"
+                        "Community Queries: %s\n"
+                        "==================================================",
+                        question,
+                        tool_input.get("need_official"),
+                        tool_input.get("need_community"),
+                        tool_name,
+                        tool_input.get("target"),
+                        tool_input.get("topic"),
+                        tool_input.get("fact_type"),
+                        tool_input.get("time_scope"),
+                        tool_input.get("official_queries"),
+                        tool_input.get("community_queries"),
+                    )
 
-    answer = ask_nova(
-        prompt,
-        max_tokens=1024,
-    )
+                    if tool_name == "search_policy" and enable_search:
+                        evidence = execute_search_policy(tool_input, conversation_context=chat_history)
+                        last_evidence = evidence
+                        is_sufficient = evidence.get("is_sufficient", True)
 
-    # Automatic validation: Check for negation contradiction, intent mismatch, or missing numerical figure
+                        log.info(
+                            "\nTOOL RESULT:\n"
+                            "Primary Source: %s\n"
+                            "Extracted Facts: %s\n"
+                            "Relevant Excerpt: %s\n\n"
+                            "AGENT EVALUATION:\n"
+                            "Sufficiency: %s\n"
+                            "Reason: %s\n",
+                            evidence.get("primary_source", {}).get("title") if evidence.get("primary_source") else "None",
+                            [f.get("value") for f in evidence.get("extracted_facts", [])],
+                            (evidence.get("extracted_facts", [{}])[0].get("relevant_excerpt") or "")[:200] if evidence.get("extracted_facts") else "None",
+                            "SUFFICIENT" if is_sufficient else "INSUFFICIENT",
+                            evidence.get("insufficiency_reason") or "Required facts found.",
+                        )
+
+                        for src in evidence.get("official_sources", []):
+                            if src not in curated_official:
+                                curated_official.append(src)
+                        for src in evidence.get("unofficial_sources", []):
+                            if src not in curated_unofficial:
+                                curated_unofficial.append(src)
+                        if evidence.get("primary_source") and not is_opinion_q:
+                            current_applicable = evidence["primary_source"]
+                        if evidence.get("extracted_facts") and not is_opinion_q:
+                            official_facts = evidence["extracted_facts"]
+                        conflicts = evidence.get("conflicts", [])
+                        if evidence.get("search_summary"):
+                            synth_data = evidence["search_summary"]
+
+                        # Append assistant toolUse and user toolResult
+                        messages.append(resp["raw_message"])
+                        messages.append({
+                            "role": "user",
+                            "content": [
+                                {
+                                    "toolResult": {
+                                        "toolUseId": call["id"],
+                                        "content": [{"json": evidence}],
+                                        "status": "success",
+                                    }
+                                }
+                            ],
+                        })
+                continue
+
+            # Model produced final answer
+            answer = resp.get("text") or ""
+            break
+
+        if not answer:
+            # Fallback generation if iterations were exhausted
+            fallback_intent = last_tool_input.get("fact_type") or ("public_opinion" if is_opinion_q else "policy_fact")
+            prompt = build_prompt(
+                question=question,
+                official_sources=curated_official,
+                unofficial_sources=curated_unofficial,
+                search_agent_data=synth_data,
+                chat_history=chat_history,
+                current_applicable_source=current_applicable if not is_opinion_q else None,
+                conflicting_sources=conflicts,
+                query_intent=fallback_intent,
+                rewritten_query=question,
+                official_facts=official_facts if not is_opinion_q else [],
+                time_scope=last_tool_input.get("time_scope", "current"),
+            )
+            answer = ask_nova(prompt, max_tokens=1024)
+
+    resolved_intent = plan.intent if router_mode == "regex" else (last_tool_input.get("fact_type") or ("public_opinion" if is_opinion_q else "policy_fact"))
+    resolved_q = plan.resolved_query if router_mode == "regex" else question
+
+    # STEP 5: Consistency Validation & Negation Prevention
     contradiction = _validate_consistency(
         answer,
         curated_official,
-        query_intent=query_intent,
+        query_intent=resolved_intent,
         official_facts=official_facts,
     )
     if contradiction:
         log.warning("Detected consistency issue in Query Agent response: %s", contradiction)
         repair_prompt = f"""
-{prompt}
+USER QUESTION: {question}
+
+CURRENT ANSWER:
+{answer}
 
 ==================================================
 CORRECTION REQUIRED
@@ -627,14 +808,41 @@ Please rewrite your response to strictly address the user's intent and required 
 - If this is an opinion inquiry, summarize actual community discussion themes (waiting times, affordability, ballot uncertainty) and do NOT provide an income ceiling.
 - If this is a policy inquiry with an active payout or grant, ensure the answer is affirmative and grounded in the official source.
 - Under 'Key Conditions/Figures', provide exactly:
-  - Category: <demographic, e.g. families>
-  - Exact official figure or percentage: <figure, e.g. $16,000>
-  - Applicable date: <effective date, e.g. Active from 24 August 2026>
+  - Category: <demographic, e.g. families or singles>
+  - Exact official figure or percentage: <exact numerical figure, e.g. $16,000, $8,000, or $7,000>
+  - Applicable date: <effective date or historical timeframe>
   Do NOT paste raw excerpt paragraphs or long sentences into Key Conditions/Figures.
 """
         answer = ask_nova(repair_prompt, max_tokens=1024)
 
-    # Persist the interaction into DynamoDB session store (refreshes 1h TTL)
+    # STEP 6: Structured Debug Trace Output
+    log.info(
+        "\n==================================================\n"
+        "MAIN AGENT ORCHESTRATION DEBUG TRACE\n"
+        "==================================================\n"
+        "1. Original Query: %s\n"
+        "2. Resolved Query: %s\n"
+        "3. Router Mode: %s\n"
+        "4. Official Search Sources: %d retrieved\n"
+        "5. Community Search Sources: %d retrieved\n"
+        "6. Verification Decisions:\n"
+        "   - Primary Source: %s\n"
+        "   - Conflicts/Superseded: %s\n"
+        "   - Grounded Policy Facts: %s\n"
+        "7. Final Answer:\n%s\n"
+        "==================================================",
+        question,
+        resolved_q,
+        router_mode,
+        len(curated_official),
+        len(curated_unofficial),
+        current_applicable.get("title") if current_applicable else "None",
+        [c.get("reason") for c in conflicts],
+        [f.get("value") for f in official_facts],
+        answer,
+    )
+
+    # STEP 7: Persist turn in session
     try:
         _persist_turn(session, question, answer)
         _LAST_ACTIVE_SESSION_ID = current_session_id

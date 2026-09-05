@@ -171,13 +171,25 @@ Content:
     if intent_type in ("PUBLIC_OPINION", "USER_EXPERIENCE", "PROS_CONS"):
         opinion_guidelines = """
 ==================================================
-CRITICAL DIRECTIVE FOR PUBLIC OPINION / EXPERIENCES:
+SECTION 44: COMMUNITY SENTIMENT SYNTHESIS DIRECTIVE:
 ==================================================
-- The user is inquiring about public sentiment, community experiences, or pros/cons.
-- Synthesize real themes from the UNOFFICIAL COMMUNITY SOURCES (e.g. waiting times, ballot uncertainty, affordability, location trade-offs, flat size).
-- DO NOT answer with an unrelated income ceiling or administrative eligibility rule (e.g. gross monthly household income ceiling of $8,000 for singles).
-- Use clear community phrasing: "Common themes discussed on forums include...", "Several commenters reported...".
-- Official sources provide only brief factual context if relevant.
+The user is asking for public opinion, community sentiment, or lived experiences.
+Synthesize strictly from UNOFFICIAL COMMUNITY SOURCES (Reddit, HardwareZone, forums).
+
+Structure your community synthesis under the following headings:
+COMMUNITY SENTIMENT:
+- Positive themes: [Supported views, with source title]
+- Negative concerns: [Recurring concerns, delays, ballot challenges, with source title]
+- Mixed/controversial views: [Trade-offs, e.g. location vs waiting time, with source title]
+- Common experiences: [Balloting rounds, marriage milestone timing, with source title]
+- Frequently raised questions: [Recurring questions raised in discussions, with source title]
+
+RULES:
+1. For every important sentiment, retain the supporting source title/URL.
+2. DO NOT turn one user's comment into "Singaporeans think...".
+3. Use cautious phrasing: "Some users discussed...", "A recurring concern in the discussions was...", "Several commenters mentioned...", "Views were mixed...".
+4. DO NOT substitute an official government page or income ceiling as public sentiment!
+5. Official sources may only provide brief factual context if relevant.
 ==================================================
 """
 
@@ -205,6 +217,11 @@ def gather_and_search(
     urls: list[str] | None = None,
     provided_sources: list[dict] | None = None,
     conversation_context: list[dict] | None = None,
+    need_official: bool = True,
+    need_community: bool = True,
+    official_queries: list[str] | None = None,
+    community_queries: list[str] | None = None,
+    plan_dict: dict | None = None,
 ) -> dict[str, Any]:
     """
     Search, scrape, and structure intelligence from official Singapore government sources
@@ -223,40 +240,68 @@ def gather_and_search(
     rewritten_query: str = question
     debug_trace = None
 
-    if provided_sources:
+    if provided_sources is not None:
         for s in provided_sources:
             if s.get("is_official", True):
-                all_official.append(s)
+                if need_official:
+                    all_official.append(s)
             else:
-                all_unofficial.append(s)
-
-    if urls:
+                if need_community:
+                    all_unofficial.append(s)
+        query_intent = (plan_dict.get("intent") if plan_dict else None) or classify_intent(question)
+    elif urls:
         scraped = scrape_sources(urls)
         for s in scraped:
             if s.get("is_official", True):
-                if s not in all_official:
+                if need_official and s not in all_official:
                     all_official.append(s)
             else:
-                if s not in all_unofficial:
+                if need_community and s not in all_unofficial:
                     all_unofficial.append(s)
-    elif not provided_sources:
+        query_intent = (plan_dict.get("intent") if plan_dict else None) or classify_intent(question)
+    else:
+        effective_query = (plan_dict.get("resolved_query") if plan_dict else None) or question
         intel = build_search_intelligence(
-            question,
+            effective_query,
             conversation_context=conversation_context,
-            include_unofficial=True,
+            include_official=need_official,
+            include_unofficial=need_community,
         )
-        all_official.extend(intel.get("official_sources", []))
-        all_unofficial.extend(intel.get("unofficial_sources", []))
-        current_applicable = intel.get("current_applicable_source")
-        conflicts = intel.get("conflicting_sources", [])
-        official_facts = intel.get("official_policy_facts", [])
-        community_insights = intel.get("community_insights", [])
+        if need_official:
+            all_official.extend(intel.get("official_sources", []))
+            current_applicable = intel.get("current_applicable_source")
+            conflicts = intel.get("conflicting_sources", [])
+            official_facts = intel.get("official_policy_facts", [])
+        if need_community:
+            all_unofficial.extend(intel.get("unofficial_sources", []))
+            community_insights = intel.get("community_insights", [])
+
         query_intent = intel.get("query_intent", "GENERAL_INFORMATION")
         rewritten_query = intel.get("rewritten_query", question)
         debug_trace = intel.get("debug_trace")
 
-    if not current_applicable and all_official:
+    is_opinion = query_intent in ("PUBLIC_OPINION", "USER_EXPERIENCE", "PROS_CONS")
+    if not current_applicable and all_official and not is_opinion:
         current_applicable = all_official[0]
+
+    # Section 39 & 43: If user has opinion intent and no community sources were found,
+    # DO NOT fall back to an unrelated official government policy page
+    if is_opinion and not all_unofficial:
+        fallback_res = {
+            "query_intent": query_intent,
+            "rewritten_query": rewritten_query,
+            "official_sources": all_official if need_official else [],
+            "unofficial_sources": [],
+            "current_applicable_source": None,
+            "conflicting_sources": [],
+            "official_policy_facts": [],
+            "community_insights": [],
+            "search_summary": "Insufficient public discussion evidence was found in available community sources.",
+            "debug_trace": debug_trace,
+        }
+        if debug_trace:
+            debug_trace.emit()
+        return fallback_res
 
     # If no sources gathered at all
     if not all_official and not all_unofficial:

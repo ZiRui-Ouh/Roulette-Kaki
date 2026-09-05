@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from agents.query import build_prompt, answer_question
 
 class QueryIntegrationTests(unittest.TestCase):
     def setUp(self):
+        os.environ["ROUTER_MODE"] = "regex"
         self.client = TestClient(app)
 
     def test_build_prompt_structure(self):
