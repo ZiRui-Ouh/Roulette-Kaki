@@ -26,6 +26,28 @@ MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
 _client = None
 
 
+def strip_thinking_tags(text: str | None) -> str:
+    """
+    Remove internal reasoning tokens such as <thinking>...</thinking>,
+    <thought>...</thought>, <inner_monologue>...</inner_monologue>, etc.
+    """
+    if not text:
+        return ""
+    cleaned = re.sub(
+        r"<(?:thinking|thought|reasoning|scratchpad|reflection|inner_monologue)>.*?</(?:thinking|thought|reasoning|scratchpad|reflection|inner_monologue)>",
+        "",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"<(?:thinking|thought|reasoning|scratchpad|reflection|inner_monologue)>.*$",
+        "",
+        cleaned,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    return cleaned.strip()
+
+
 def get_client():
     """
     Create the Bedrock Runtime client.
@@ -74,7 +96,7 @@ def ask_nova(prompt: str, max_tokens: int = 2048) -> str:
                 "topP": 0.9,
             },
         )
-        return response["output"]["message"]["content"][0]["text"]
+        return strip_thinking_tags(response["output"]["message"]["content"][0]["text"])
     except Exception as exc:
         log.warning("Search Agent Bedrock converse call failed (%s) — synthesizing dynamically", exc)
 

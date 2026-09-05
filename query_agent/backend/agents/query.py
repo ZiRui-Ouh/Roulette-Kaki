@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from services.bedrock import ask_nova, converse_with_tools
+from services.bedrock import ask_nova, converse_with_tools, strip_thinking_tags
 from services.search_service import (
     fetch_from_search_agent,
     get_search_policy_tool_spec,
@@ -657,6 +657,13 @@ def answer_question(
                 question.lower(),
             )
         )
+        if chat_history and not is_opinion_q:
+            history_text = " ".join(turn.get("content", "") for turn in chat_history).lower()
+            is_short_followup = any(question.lower().startswith(w) for w in ["what about", "how about", "and for", "what of"]) or len(question.split()) <= 5
+            if is_short_followup and any(w in history_text for w in ["opinion", "think", "sentiment", "feel", "feedback", "pros and cons"]):
+                if not any(w in question.lower() for w in ["ceiling", "income ceiling", "rule", "limit", "grant", "payout"]):
+                    is_opinion_q = True
+
         active_system_prompt = OPINION_AGENT_PROMPT if is_opinion_q else QUERY_AGENT_PROMPT
 
         user_prompt = f"USER QUESTION: {question}\n"
@@ -841,6 +848,9 @@ Please rewrite your response to strictly address the user's intent and required 
         [f.get("value") for f in official_facts],
         answer,
     )
+
+    # Ensure no reasoning tags leak into the final response or session storage
+    answer = strip_thinking_tags(answer)
 
     # STEP 7: Persist turn in session
     try:

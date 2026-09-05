@@ -322,6 +322,48 @@ def extract_policy_facts_from_sources(
                             )
                         )
 
+            # 6. Transport / COE Bidding Results
+            if re.search(r"\b(coe|quota premium|open bidding|onemotoring)\b", p_clean, re.I) and "$" in p_clean:
+                coe_m = re.search(r"(Category [A-E]|Cat [A-E])[:\s-]+(\$[\d,]+)", p_clean, re.I)
+                if coe_m:
+                    cat_name = coe_m.group(1).title()
+                    val = coe_m.group(2)
+                    if (cat_name, "current", val) not in seen:
+                        seen.add((cat_name, "current", val))
+                        current_facts.append(
+                            PolicyFact(
+                                fact=f"COE Quota Premium ({cat_name})",
+                                category="transport",
+                                housing_type=None,
+                                value=val,
+                                effective_date="Latest Exercise (March 2026)",
+                                source_title=title,
+                                source_url=url,
+                                relevant_excerpt=p_clean,
+                                is_current=True,
+                            )
+                        )
+
+            # 7. Education / PSLE Scoring and Full SBB
+            if re.search(r"\b(psle|achievement level|al\s*[1-8]|posting group|full sbb)\b", p_clean, re.I):
+                if "al 1" in p_lower or "achievement level" in p_lower:
+                    val = "AL 1 to AL 8 (Score 4 to 32)"
+                    if ("psle", "current", val) not in seen:
+                        seen.add(("psle", "current", val))
+                        current_facts.append(
+                            PolicyFact(
+                                fact="PSLE Achievement Level (AL) Scoring System",
+                                category="education",
+                                housing_type=None,
+                                value=val,
+                                effective_date="Active",
+                                source_title=title,
+                                source_url=url,
+                                relevant_excerpt=p_clean,
+                                is_current=True,
+                            )
+                        )
+
     return current_facts, historical_facts
 
 

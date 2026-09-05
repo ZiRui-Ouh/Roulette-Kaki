@@ -190,6 +190,56 @@ def _to_topic_meta(digest_topic: dict) -> TopicMeta:
     )
 
 
+<<<<<<< Updated upstream
+=======
+def _hydrate_topic_doc(
+    date: str,
+    topic_id: str,
+    topic_meta_by_id: dict[str, dict],
+) -> bedrock.Document | None:
+    """S3 hit → cached bytes. S3 miss → scraper.fetch_report +
+    storage.put_report. Scrape failure → metadata-only HTML placeholder
+    (NOT cached, so a transient SPRS outage can't poison S3).
+
+    Returns None only if `topic_id` isn't in `topic_meta_by_id`.
+    """
+    meta = topic_meta_by_id.get(topic_id)
+    if meta is None:
+        return None
+    ext = meta.get("format") or "html"
+    bytes_ = storage.get_report(date, topic_id, ext)
+    if bytes_ is None:
+        log.info("chat: fetching report for %s from SPRS", topic_id)
+        try:
+            bytes_ = scraper.fetch_report(_to_topic_meta(meta))
+            storage.put_report(date, topic_id, ext, bytes_)
+        except Exception as e:  # noqa: BLE001
+            log.info(
+                "SPRS fetch failed for %s (%s) — attaching metadata-only "
+                "placeholder ephemerally; will retry SPRS next turn",
+                topic_id,
+                e,
+            )
+            topic_title = meta.get("title", topic_id)
+            speakers_str = ", ".join(meta.get("speakers", []))
+            bytes_ = (
+                f"<html><body><h1>{topic_title}</h1>"
+                f"<p>Speakers: {speakers_str}</p>"
+                f"<p>NOTE: Full transcript for this topic could not be "
+                f"retrieved this turn. Only the topic title and speakers "
+                f"are available. Ask the user to try again shortly.</p>"
+                f"</body></html>"
+            ).encode("utf-8")
+            # Deliberately NOT calling storage.put_report on the placeholder.
+    return bedrock.Document(
+        topic_id=topic_id,
+        name=topic_id,
+        format=ext,
+        bytes_=bytes_,
+    )
+
+
+>>>>>>> Stashed changes
 def get_research_tool_specs() -> list[dict]:
     """Return Bedrock Converse tool specifications for the Research Agent."""
     return [
@@ -432,12 +482,15 @@ def run_chat(
     topic_meta_by_id: dict[str, dict] = {
         t["topic_id"]: t for t in digest.get("topics", [])
     }
+<<<<<<< Updated upstream
     log.info(
         "[DIGEST] loaded for date=%s | %d topics available: %s",
         date,
         len(topic_meta_by_id),
         list(topic_meta_by_id.keys()),
     )
+=======
+>>>>>>> Stashed changes
 
     # Pre-register explicit topic_id if passed
     if topic_id and topic_id in topic_meta_by_id and topic_id not in session["topics_loaded"]:

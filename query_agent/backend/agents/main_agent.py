@@ -209,13 +209,27 @@ def _safe_fallback_plan(question: str, conversation_context: list[dict] | None =
         target = "families"
     elif "senior" in curr_q_lower:
         target = "seniors"
-    elif "ec" in curr_q_lower or "executive" in curr_q_lower:
+    elif bool(re.search(r"\b(ec|ecs|executive condo|executive condominiums?)\b", curr_q_lower)):
         target = "executive_condominiums"
 
-    # Topic detection
-    topic = "BTO" if ("bto" in curr_q_lower or "bto" in history_text) else "Singapore Policy"
-    if "cpf" in curr_q_lower or "cpf" in history_text:
+    # Multi-domain policy topic detection
+    topic = "Singapore Policy"
+    if any(w in curr_q_lower or w in history_text for w in ["bto", "hdb", "flat", "resale", "mop", "housing"]):
+        topic = "BTO"
+    elif any(w in curr_q_lower or w in history_text for w in ["cpf", "ordinary account", "oa", "special account", "sa", "retirement account", "ra", "medisave", "ers", "brs", "frs"]):
         topic = "CPF"
+    elif any(w in curr_q_lower or w in history_text for w in ["medishield", "hospital", "ward", "icu", "claim limit", "claim cap", "healthcare", "ctgtp", "chas", "moh"]):
+        topic = "Healthcare"
+    elif any(w in curr_q_lower or w in history_text for w in ["skillsfuture", "level-up", "reskill", "training allowance", "jobseeker", "retrenchment", "mom", "workforce", "career"]):
+        topic = "Jobs & Skills"
+    elif any(w in curr_q_lower or w in history_text for w in ["parental leave", "paternity", "maternity", "baby bonus", "cost of living", "col", "special payment", "cdc voucher", "gst voucher", "majulah", "grant", "payout"]):
+        topic = "Grants & Families"
+    elif any(w in curr_q_lower or w in history_text for w in ["parliament", "hansard", "sitting", "debate", "ministerial statement", "bill", "oral question", "motion", "sprs"]):
+        topic = "Parliament & Hansard"
+    elif any(w in curr_q_lower or w in history_text for w in ["coe", "certificate of entitlement", "quota premium", "onemotoring", "lta"]):
+        topic = "Transport / COE"
+    elif any(w in curr_q_lower or w in history_text for w in ["psle", "primary school leaving", "full sbb", "posting group", "achievement level", "moe"]):
+        topic = "Education / PSLE"
 
     # Temporal scope
     time_scope = "historical" if any(w in curr_q_lower for w in ["previous", "past", "prior", "before", "history", "was the"]) else "current"
@@ -238,7 +252,7 @@ def _safe_fallback_plan(question: str, conversation_context: list[dict] | None =
         has_opinion_words = any(w in curr_q_lower for w in ["opinion", "think", "feel", "sentiment"])
         has_pros_cons = any(w in curr_q_lower for w in ["pros and cons", "pros & cons"])
         has_experience = any(w in curr_q_lower for w in ["how long", "waiting time", "experience"])
-        has_policy_words = any(w in curr_q_lower for w in ["income ceiling", "ceiling", "grant", "rate", "eligib", "criteria", "qualify"])
+        has_policy_words = any(w in curr_q_lower for w in ["income ceiling", "ceiling", "grant", "rate", "eligib", "criteria", "qualify", "claim limit", "allowance", "leave", "entitlement", "payout", "bill", "motion", "coe", "quota premium", "psle", "al 1"])
 
         if has_opinion_words:
             intent = "public_opinion"
@@ -250,12 +264,12 @@ def _safe_fallback_plan(question: str, conversation_context: list[dict] | None =
             intent = "eligibility" if ("ceiling" in curr_q_lower or "eligib" in curr_q_lower) else "policy_fact"
 
     # Dual query check
-    has_both = (any(w in curr_q_lower for w in ["opinion", "think"]) and any(w in curr_q_lower for w in ["income ceiling", "ceiling"]))
+    has_both = (any(w in curr_q_lower for w in ["opinion", "think"]) and any(w in curr_q_lower for w in ["income ceiling", "ceiling", "claim limit", "entitlement"]))
 
-    # Agents to invoke
+    # Agents to invoke and domain-aware query generation
     if has_both:
         agents = ["official_search", "community_search", "verification"]
-        official_queries = [f"{topic} income ceiling {target} gov.sg"]
+        official_queries = [f"{topic} {target} official criteria site:gov.sg"]
         community_queries = [f"{topic} {target} opinions reddit singapore"]
     elif intent in ("public_opinion", "user_experience", "pros_cons"):
         agents = ["community_search", "verification"]
@@ -263,8 +277,31 @@ def _safe_fallback_plan(question: str, conversation_context: list[dict] | None =
         community_queries = [f"{curr_q} reddit singapore hardwarezone"]
     else:
         agents = ["official_search", "verification"]
-        official_queries = [f"{topic} {curr_q} site:gov.sg"]
         community_queries = []
+        if topic == "Healthcare":
+            official_queries = ["MediShield Life claim limits review MOH site:moh.gov.sg"]
+        elif topic == "Jobs & Skills":
+            official_queries = ["SkillsFuture Level-Up Programme training allowance credit site:skillsfuture.gov.sg OR site:ssg.gov.sg"]
+        elif topic == "Grants & Families":
+            if "parental leave" in curr_q_lower or "paternity" in curr_q_lower or "maternity" in curr_q_lower:
+                official_queries = ["Shared Parental Leave entitlement enhancements MOM site:mom.gov.sg"]
+            else:
+                official_queries = ["Enhanced Cost of Living Special Payment Budget 2026 site:mof.gov.sg"]
+        elif topic == "Parliament & Hansard":
+            official_queries = [f"{curr_q} site:sprs.parl.gov.sg OR site:parliament.gov.sg"]
+        elif topic == "Transport / COE":
+            official_queries = ["LTA OneMotoring current COE bidding results quota premium Cat A Cat B Cat E site:onemotoring.lta.gov.sg OR site:lta.gov.sg"]
+        elif topic == "Education / PSLE":
+            official_queries = ["MOE PSLE scoring system achievement levels AL Full SBB secondary school posting site:moe.gov.sg"]
+        elif topic == "CPF":
+            if "closure" in curr_q_lower or "close" in curr_q_lower:
+                official_queries = ["CPF Special Account closure age 55 site:cpf.gov.sg"]
+            else:
+                official_queries = ["CPF interest rates Ordinary Special Retirement Accounts site:cpf.gov.sg"]
+        elif topic == "BTO":
+            official_queries = [f"HDB BTO income ceiling eligibility {target} site:hdb.gov.sg"]
+        else:
+            official_queries = [f"{topic} {curr_q} site:gov.sg"]
 
     # Resolved query
     if is_followup:
@@ -296,6 +333,29 @@ def _safe_fallback_plan(question: str, conversation_context: list[dict] | None =
     )
 
 
+def _normalize_topic(raw_topic: str, question: str) -> str:
+    """Normalize granular LLM topic titles to established policy domain desks."""
+    t_lower = (raw_topic or "").lower()
+    q_lower = (question or "").lower()
+    if any(k in q_lower for k in ["parliament", "hansard", "debate", "sitting", "motion"]):
+        return "Parliament & Hansard"
+    if any(k in t_lower for k in ["medishield", "healthcare", "hospital", "ward", "icu", "claim limit"]):
+        return "Healthcare"
+    if any(k in t_lower for k in ["skillsfuture", "skills", "training allowance", "reskill", "jobseeker"]):
+        return "Jobs & Skills"
+    if any(k in t_lower for k in ["parental leave", "spl", "paternity", "maternity", "cost of living", "col", "voucher", "grant", "payout", "baby bonus"]):
+        return "Grants & Families"
+    if any(k in t_lower for k in ["coe", "certificate of entitlement", "quota premium", "onemotoring"]):
+        return "Transport / COE"
+    if any(k in t_lower for k in ["psle", "primary school leaving", "full sbb", "posting group"]):
+        return "Education / PSLE"
+    if any(k in t_lower for k in ["bto", "hdb", "flat", "resale"]):
+        return "BTO"
+    if any(k in t_lower for k in ["cpf", "ordinary account", "special account"]):
+        return "CPF"
+    return raw_topic or "Singapore Policy"
+
+
 def create_search_plan(
     question: str,
     conversation_context: list[dict] | None = None,
@@ -312,7 +372,23 @@ def create_search_plan(
     try:
         raw_output = bedrock.ask_nova(prompt, max_tokens=1024)
         parsed_dict = _extract_json_object(raw_output)
+        if "topic" in parsed_dict:
+            parsed_dict["topic"] = _normalize_topic(parsed_dict["topic"], question)
         plan = MainAgentPlan.model_validate(parsed_dict)
+
+        # Context inheritance guardrail for opinion follow-ups (Section 38 & 40)
+        if conversation_context:
+            history_text = " ".join(msg.get("content", "") for msg in conversation_context).lower()
+            curr_q_lower = question.strip().lower()
+            is_short_followup = any(curr_q_lower.startswith(w) for w in ["what about", "how about", "and for", "what of"]) or len(curr_q_lower.split()) <= 5
+            if is_short_followup and any(w in history_text for w in ["opinion", "think", "sentiment", "feel"]):
+                if not any(w in curr_q_lower for w in ["ceiling", "income ceiling", "rule", "limit", "grant", "payout"]):
+                    plan.intent = "public_opinion"
+                    plan.agents_to_invoke = ["community_search", "verification"]
+                    plan.search_queries.official = []
+                    if not plan.search_queries.community:
+                        plan.search_queries.community = [f"BTO {plan.target} opinions reddit singapore hardwarezone"]
+
         log.info(
             "Main Agent resolved plan: intent=%s, topic=%s, target=%s, agents=%s, resolved_query=%s",
             plan.intent,
@@ -325,3 +401,4 @@ def create_search_plan(
     except Exception as exc:
         log.warning("Main Agent planning failed (%s). Falling back to safe default plan.", exc)
         return _safe_fallback_plan(question, conversation_context)
+

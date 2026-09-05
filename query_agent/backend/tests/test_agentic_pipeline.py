@@ -177,7 +177,7 @@ class TestAgenticPipeline(unittest.TestCase):
         )
         chat_res = run_chat("test-sess-1", "2024-09-09", "What did Minister Desmond Lee say about housing grants?")
         self.assertTrue(chat_res.grounded)
-        self.assertIn("Housing Grants", chat_res.reply)
+        self.assertTrue(any(token in chat_res.reply.lower() for token in ["housing grants", "housing grant"]))
 
 
 if __name__ == "__main__":

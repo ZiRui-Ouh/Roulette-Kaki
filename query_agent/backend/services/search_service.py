@@ -166,7 +166,7 @@ def get_search_policy_tool_spec() -> dict:
                         },
                         "fact_type": {
                             "type": "string",
-                            "enum": ["income_ceiling", "eligibility", "interest_rate", "payout_amount", "public_opinion", "pros_cons", "general"],
+                            "enum": ["income_ceiling", "eligibility", "interest_rate", "payout_amount", "claim_limit", "training_allowance", "parental_leave", "parliament_debate", "coe_bidding", "psle_policy", "public_opinion", "pros_cons", "general"],
                             "description": "Type of fact or insight required.",
                         },
                         "housing_type": {
@@ -286,6 +286,36 @@ def evaluate_evidence_sufficiency(
         if not any(token in raw_text for token in ["$", "payout", "payment", "September", "disbursement"]):
             return False, "No payout figures or disbursement schedules were found in retrieved sources."
 
+    elif fact_type == "claim_limit":
+        raw_text = " ".join([s.get("content", "") for s in official_sources]) + " " + search_summary
+        if not any(token in raw_text for token in ["$200,000", "200,000", "claim limit", "$5,140", "$1,630", "MediShield"]):
+            return False, "No MediShield claim limit figures were found in retrieved sources."
+
+    elif fact_type == "training_allowance":
+        raw_text = " ".join([s.get("content", "") for s in official_sources]) + " " + search_summary
+        if not any(token in raw_text for token in ["$4,000", "4,000", "$3,000", "3,000", "SkillsFuture", "training allowance"]):
+            return False, "No SkillsFuture credit or training allowance figures were found in retrieved sources."
+
+    elif fact_type == "parental_leave":
+        raw_text = " ".join([s.get("content", "") for s in official_sources]) + " " + search_summary
+        if not any(token in raw_text for token in ["10 weeks", "6 weeks", "$2,500", "Shared Parental Leave", "parental leave"]):
+            return False, "No shared parental leave weeks or wage cap figures were found in retrieved sources."
+
+    elif fact_type == "parliament_debate":
+        raw_text = " ".join([s.get("content", "") for s in official_sources]) + " " + search_summary
+        if not any(token in raw_text for token in ["Parliament", "Hansard", "Topic", "Motion", "Sitting", "Debate"]):
+            return False, "No parliamentary debate records or topics were found in retrieved sources."
+
+    elif fact_type == "coe_bidding":
+        raw_text = " ".join([s.get("content", "") for s in official_sources]) + " " + search_summary
+        if not any(token in raw_text for token in ["Cat A", "Cat B", "Cat C", "Cat E", "Quota Premium", "COE", "bidding"]):
+            return False, "No COE quota premium or category bidding results were found in retrieved sources."
+
+    elif fact_type == "psle_policy":
+        raw_text = " ".join([s.get("content", "") for s in official_sources]) + " " + search_summary
+        if not any(token in raw_text for token in ["AL", "Achievement Level", "Posting Group", "Full SBB", "PSLE", "scoring"]):
+            return False, "No PSLE scoring system or secondary posting rules were found in retrieved sources."
+
     return True, None
 
 
@@ -359,6 +389,10 @@ def execute_search_policy(
         else (verification_res.current_facts or verification_res.historical_facts)
     )
     facts_dicts = [f.model_dump() for f in facts]
+    if not facts_dicts:
+        fallback_facts = search_result.get("official_policy_facts") or search_result.get("extracted_facts", [])
+        if fallback_facts:
+            facts_dicts = fallback_facts
 
     # 3. Evaluate sufficiency
     is_sufficient, reason = evaluate_evidence_sufficiency(tool_input, search_result, facts_dicts)
