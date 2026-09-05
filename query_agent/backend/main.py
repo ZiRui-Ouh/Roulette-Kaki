@@ -25,17 +25,30 @@ os.environ.setdefault("USE_LOCAL_STUBS", "1")
 os.environ.setdefault("SCRAPER_MODE", "fixture")
 os.environ.setdefault("YOUTUBE_PLAYLIST", "PLetiU3qG4uSrSjL6UlfVsgR89lxBzP5D1")
 
+# Root logging config — uvicorn only wires its own loggers, so module
+# loggers like `agents.research` need a handler here to reach stdout.
+# `force=True` displaces any prior NullHandler that got attached at import.
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+    force=True,
+)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from agents import digest as digest_agent
 from agents import research as research_agent
+from agents.main_agent import create_search_plan
 from agents.query import answer_question
+from services import bedrock as bedrock_service
 from services import sittings as sittings_service
 from services import storage as storage_service
 from services import translation as translation_service
 from services.meralion import MeraLionAuthError, MeraLionError, MeraLionRateLimitError
+from services.search_service import fetch_from_search_agent
 from services.translation import TranslationError
 from services.translation_wrapper import is_fast_path, with_translation
 
@@ -296,6 +309,130 @@ def _translate_digest(digest: dict, language: Lang) -> dict:
     return translated
 
 
+# Intents for which a Hansard "not covered" answer should trigger a
+# web-search fallback via the Policy Query Agent's orchestrator. Opinion
+# / experience / follow-up intents deliberately stay on Hansard — they're
+# meaningful about the debate itself, and a web fallback would cross wires.
+_WEB_FALLBACK_INTENTS = frozenset({
+    "policy_fact",
+    "eligibility",
+    "announcement/update",
+    "process/how_to",
+    "comparison",
+})
+
+
+def _format_fallback_sources(sources: list[dict], limit: int = 4) -> str:
+    if not sources:
+        return "(none)"
+    lines = []
+    for s in sources[:limit]:
+        title = s.get("title") or "Untitled"
+        url = s.get("url") or ""
+        content = (s.get("content") or s.get("text") or "").strip()
+        if len(content) > 600:
+            content = content[:600] + "…"
+        lines.append(f"- {title} ({url})\n{content}")
+    return "\n".join(lines)
+
+
+def _web_fallback_reply(
+    *,
+    question: str,
+    hansard_reply: str,
+    chat_history: list[dict],
+    date: str,
+) -> tuple[str, bool] | None:
+    """When Hansard research returns grounded=False, try to answer via the
+    Policy Query Agent's orchestrator + Search Agent bridge.
+
+    Returns (combined_reply, grounded=True) on success, or None when the
+    fallback is disabled, out of scope for this intent, or fails.
+    """
+    if os.environ.get("ENABLE_WEB_FALLBACK", "1") != "1":
+        return None
+
+    try:
+        plan = create_search_plan(question, conversation_context=chat_history)
+    except Exception as e:
+        log.warning("[WEB_FALLBACK] create_search_plan failed: %s", e)
+        return None
+
+    if plan.intent not in _WEB_FALLBACK_INTENTS:
+        log.info(
+            "[WEB_FALLBACK] skipped — intent=%s not in allow-list",
+            plan.intent,
+        )
+        return None
+
+    need_official = "official_search" in plan.agents_to_invoke
+    need_community = "community_search" in plan.agents_to_invoke
+
+    try:
+        evidence = fetch_from_search_agent(
+            question=plan.resolved_query or question,
+            conversation_context=chat_history,
+            need_official=need_official,
+            need_community=need_community,
+            official_queries=plan.search_queries.official,
+            community_queries=plan.search_queries.community,
+            plan_dict=plan.model_dump(),
+        )
+    except Exception as e:
+        log.warning("[WEB_FALLBACK] fetch_from_search_agent failed: %s", e)
+        return None
+
+    official = evidence.get("official_sources") or []
+    unofficial = evidence.get("unofficial_sources") or []
+    synthesis = (evidence.get("search_summary") or "").strip()
+    if not (official or unofficial or synthesis):
+        log.info("[WEB_FALLBACK] search returned no evidence — leaving reply as-is")
+        return None
+
+    compose_prompt = f"""
+You are answering a Singapore policy question that was NOT covered by the
+Parliament sitting on {date}. Use ONLY the web-sourced evidence below.
+
+USER QUESTION: {question}
+RESOLVED QUERY: {plan.resolved_query or question}
+
+OFFICIAL SOURCES:
+{_format_fallback_sources(official)}
+
+COMMUNITY SOURCES:
+{_format_fallback_sources(unofficial)}
+
+SEARCH AGENT SYNTHESIS:
+{synthesis or "(none)"}
+
+Write a concise answer in 3-5 short sentences. Prefer official figures
+over community sentiment. Cite source titles and URLs inline where they
+support the answer. Do not speculate beyond the evidence.
+"""
+
+    try:
+        web_answer = bedrock_service.ask_nova(compose_prompt, max_tokens=1024)
+    except Exception as e:
+        log.warning("[WEB_FALLBACK] ask_nova compose failed: %s", e)
+        return None
+
+    web_answer = (web_answer or "").strip()
+    if not web_answer:
+        return None
+
+    combined = (
+        f"{hansard_reply.strip()}\n\n"
+        f"**Broader web sources indicate:**\n{web_answer}"
+    )
+    log.info(
+        "[WEB_FALLBACK] applied for intent=%s | official=%d unofficial=%d",
+        plan.intent,
+        len(official),
+        len(unofficial),
+    )
+    return combined, True
+
+
 @app.post("/debates/{date}/chat", response_model=ChatResponse)
 def chat_debate(date: str, req: ChatRequest) -> ChatResponse:
     session_id = req.session_id or str(uuid.uuid4())
@@ -324,7 +461,24 @@ def chat_debate(date: str, req: ChatRequest) -> ChatResponse:
             )
         captured["topics_used"] = r.topics_used
         captured["grounded"] = r.grounded
-        return r.reply
+        reply = r.reply
+
+        # Fallback: if Hansard didn't cover the question, try the Policy
+        # Query Agent's orchestrator + Search Agent to answer from the web.
+        if not r.grounded:
+            persisted = storage_service.get_session(session_id) or {}
+            # Drop the just-written turn so the plan sees prior context only.
+            prior_history = persisted.get("chat_history", [])[:-2]
+            fb = _web_fallback_reply(
+                question=english_message,
+                hansard_reply=r.reply,
+                chat_history=prior_history,
+                date=date,
+            )
+            if fb is not None:
+                reply, captured["grounded"] = fb
+
+        return reply
 
     try:
         reply = with_translation(req.language, req.message, _run)

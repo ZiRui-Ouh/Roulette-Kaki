@@ -93,7 +93,13 @@ inadequate on Nova Lite for interactive Q&A.
    the intra-session prompt cache reliably hits after turn 1.
 7. Parse the `<grounded>false</grounded>` marker in the reply. Strip
    the marker from the visible reply (both the returned reply and what
-   gets persisted to chat_history).
+   gets persisted to chat_history). **Route-layer fallback:** when
+   `grounded=False` and the question classifies as a policy-shaped intent
+   (`policy_fact` / `eligibility` / `announcement/update` /
+   `process/how_to` / `comparison`), `main.py::_web_fallback_reply` calls
+   `agents.main_agent.create_search_plan` + `services.search_service.fetch_from_search_agent`
+   and appends a "Broader web sources indicate:" section, flipping
+   `grounded=True`. Gated by env `ENABLE_WEB_FALLBACK` (default `"1"`).
 8. Mirror `bedrock`'s returned `kept_topic_ids` into
    `session.topics_loaded` (bedrock may have dropped the oldest topic
    if the 5/50K cap kicked in). Append user + assistant messages to
