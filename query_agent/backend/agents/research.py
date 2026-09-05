@@ -1,22 +1,26 @@
-"""Research agent — Bedrock tool-use loop over Hansard debate transcripts.
+"""Research agent — bounded agentic loop over Hansard debate transcripts.
 
-Nova Pro receives a Converse `toolConfig` with two tools and decides, per
-turn, whether the sitting overview alone answers the user's question or
-whether to pull a specific topic transcript via `fetch_topic_transcript`.
-The tool-use loop lives in `services/bedrock.chat_with_tools`; this
-module owns the tool schemas, the closure-based tool handler, session
-state, and grounding-marker parsing.
+Nova Pro receives a Converse `toolConfig` with three tools and, per
+iteration of a bounded loop, decides which (if any) tool to call:
 
-Flow:
+- `get_sitting_overview`  — digest + topic index for the sitting.
+- `search_sitting_topics` — keyword / MP-name lookup over the digest.
+- `fetch_topic_report`    — full transcript for one topic (S3 cache
+  first, SPRS fallback, updates the session's `topics_loaded`).
+
+The loop lives in this module (mirroring `agents/query.py`); each
+iteration calls `services.bedrock.converse_with_tools` and appends the
+model's toolUse + our toolResult back into `messages` until the model
+returns an `end_turn` message or `MAX_RESEARCH_ITERATIONS` is reached.
+
+Flow per request:
 
 1. Load/create the `ChatSessions` row (TTL enforced by `storage.py`).
-2. Load the digest for `date` from DDB; build `{topic_id → topic_meta}`.
-3. Build the sitting-overview `Document` and pre-hydrate any topics
-   already in `session["topics_loaded"]` (plus the optional UI hint
-   `topic_id` on this request) via `_hydrate_topic_doc`.
-4. Call `bedrock.chat_with_tools` with the tool handler defined here.
-   The handler mutates a closure-captured `loaded` dict as the model
-   pulls transcripts. Cap policy: evict-and-inform (oldest FIFO).
+2. Load the digest for `date` from DDB.
+3. Pre-register the optional UI hint `topic_id` on the session so the
+   model can see it in `topics_loaded` context.
+4. Run the bounded agentic loop, dispatching tool calls to the
+   `execute_*` handlers below.
 5. Parse `<grounded>false</grounded>`; strip the marker from the visible
    reply. Persist the turn (refreshes 1h TTL). Return
    `ChatResult(reply, topics_used, grounded, usage)`.
@@ -37,45 +41,49 @@ log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a research assistant for Singapore Parliament debates.
 
-You answer questions using ONLY the attached documents. The FIRST attached
-document is a SITTING OVERVIEW listing the digest summary and every topic
-debated in the sitting. Any additional attachments are full transcripts
-for topics that have been loaded.
+You answer questions using ONLY evidence returned by the research tools.
+You have three tools available:
 
-BEFORE calling any tool, silently scan the sitting overview's topic index.
+- `get_sitting_overview` — returns the digest summary and the topic index
+  for the sitting (titles, topic_ids, speakers).
+- `search_sitting_topics` — returns topics in the sitting that match a
+  keyword or MP name.
+- `fetch_topic_report` — returns the full transcript text for one topic.
 
+Agentic loop guidance:
+
+- On the FIRST iteration, if you don't already have the sitting overview
+  in context, call `get_sitting_overview` to see the topic index.
 - If NO topic title in the overview plausibly matches the user's question
-  (e.g. user asks about crows and no topic in the overview relates to
-  wildlife, pest control, or environment), do NOT call any tool. Reply:
+  (e.g. user asks about crows and no topic relates to wildlife, pest
+  control, or environment), do NOT call any further tool. Reply:
   "This sitting did not cover <subject>." then end with the exact marker
   <grounded>false</grounded>. Stop.
-
-- If ONE topic in the overview clearly matches the user's question and
-  its transcript is NOT already attached, call `fetch_topic_transcript`
-  ONCE for that topic_id, then answer from the returned transcript.
-
+- If ONE topic clearly matches and its transcript is not yet loaded,
+  call `fetch_topic_report` for that topic_id, then answer from the
+  returned transcript.
+- For ambiguous questions ("who spoke on transport?", "was there a bill
+  about housing?"), call `search_sitting_topics` first to narrow down
+  before fetching a full transcript.
 - If the user's question is about the sitting as a whole ("what topics
-  were covered?", "which bills were passed?", "who spoke on transport?"),
-  answer from the sitting overview WITHOUT calling any tool.
-
-- For "who spoke on topic X?" questions specifically, prefer
-  `list_speakers_for_topic` over fetching the full transcript.
+  were covered?", "which bills were passed?"), the overview alone is
+  enough — do NOT fetch transcripts.
 
 Hard rules on tool calls:
-- Never call `fetch_topic_transcript` more than TWICE per turn. If you
+- Never call `fetch_topic_report` more than TWICE per turn. If you
   cannot answer after two fetches, stop and answer from what you have.
-- Never call `fetch_topic_transcript` for a topic that is already
-  attached (a prior tool result said `already_attached` or `status: ok`).
-- If a tool result has `status: error` or `note: transcript body
-  unavailable`, do NOT retry — explain to the user and stop.
-- At most 5 topic transcripts are attached concurrently. If a tool
-  result contains `"evicted": <id>`, the oldest was dropped — do not
-  re-fetch it this turn.
+- Never call `fetch_topic_report` for a topic already present in the
+  session's loaded topics (a prior tool result had `cached: true` or the
+  topic_id appears in "Currently loaded topics").
+- If a tool result has an `error` field or `is_sufficient: false`, do
+  NOT retry the same call — explain the gap to the user and stop.
+- At most 5 topic transcripts are retained concurrently; older topics
+  are dropped by the session cap silently.
 
 Answer rules:
 - Cite the topic title and speaker where relevant.
-- If the answer is NOT in any attached document, end your reply with the
-  exact marker <grounded>false</grounded>.
+- If the answer is NOT supported by tool results, end your reply with
+  the exact marker <grounded>false</grounded>.
 - Do not answer from general knowledge. Do not speculate.
 
 Style and length:
@@ -94,54 +102,6 @@ Style and length:
   Aim for the crux in 100-200 words unless the user explicitly asks for
   "full details" or "everything".
 """
-
-
-TOOL_SPECS: list[dict] = [
-    {
-        "toolSpec": {
-            "name": "fetch_topic_transcript",
-            "description": (
-                "Fetch the full transcript for one topic in this sitting and "
-                "attach it to the conversation. Only call when the user asks "
-                "about a specific topic whose transcript is NOT already "
-                "attached. topic_id must appear in the sitting overview's "
-                "topic index."
-            ),
-            "inputSchema": {
-                "json": {
-                    "type": "object",
-                    "properties": {
-                        "topic_id": {
-                            "type": "string",
-                            "description": (
-                                "Topic id exactly as it appears in the "
-                                "sitting overview's topic index."
-                            ),
-                        }
-                    },
-                    "required": ["topic_id"],
-                }
-            },
-        }
-    },
-    {
-        "toolSpec": {
-            "name": "list_speakers_for_topic",
-            "description": (
-                "Cheap lookup: title + speakers for one topic id from digest "
-                "metadata only (no S3 or SPRS fetch). Use to disambiguate "
-                "before pulling a transcript."
-            ),
-            "inputSchema": {
-                "json": {
-                    "type": "object",
-                    "properties": {"topic_id": {"type": "string"}},
-                    "required": ["topic_id"],
-                }
-            },
-        }
-    },
-]
 
 
 # Detection: `grounded=False` only when the model emits the literal
@@ -220,50 +180,6 @@ def _persist_turn(
     storage.put_session(session)  # refreshes TTL to now + 3600
 
 
-def _build_sitting_overview(date: str, digest: dict) -> bedrock.Document:
-    """Sitting-wide metadata document, always attached at message 0."""
-    from html import escape
-
-    title = digest.get("title") or f"Parliament Sitting of {date}"
-    summary = digest.get("summary") or "No summary available."
-    topics = digest.get("topics") or []
-
-    topics_html_parts: list[str] = []
-    for t in topics:
-        t_title = escape(t.get("title") or t.get("topic_id") or "Untitled")
-        t_id = escape(t.get("topic_id") or "")
-        speakers = t.get("speakers") or []
-        speakers_str = escape(", ".join(speakers)) if speakers else ""
-        topics_html_parts.append(
-            f"<li><strong>{t_title}</strong>"
-            + (f" (id: <code>{t_id}</code>)" if t_id else "")
-            + (f" &mdash; speakers: {speakers_str}" if speakers_str else "")
-            + "</li>"
-        )
-    topics_html = "\n".join(topics_html_parts) or "<li>No topics recorded.</li>"
-
-    body = (
-        "<html><body>"
-        f"<h1>{escape(title)}</h1>"
-        f"<p><em>Sitting overview for {escape(date)}. Use this document "
-        f"to answer questions about the sitting as a whole; call "
-        f"fetch_topic_transcript for details on a specific topic.</em></p>"
-        "<h2>Digest Summary</h2>"
-        f"<p>{escape(summary)}</p>"
-        f"<h2>Topics debated ({len(topics)})</h2>"
-        f"<ul>{topics_html}</ul>"
-        "</body></html>"
-    ).encode("utf-8")
-
-    return bedrock.Document(
-        topic_id=f"sitting-overview-{date}",
-        name=f"sitting-overview-{date}",
-        format="html",
-        bytes_=body,
-        is_overview=True,
-    )
-
-
 def _to_topic_meta(digest_topic: dict) -> TopicMeta:
     return TopicMeta(
         topic_id=digest_topic["topic_id"],
@@ -274,53 +190,6 @@ def _to_topic_meta(digest_topic: dict) -> TopicMeta:
     )
 
 
-<<<<<<< Updated upstream
-def _hydrate_topic_doc(
-    date: str,
-    topic_id: str,
-    topic_meta_by_id: dict[str, dict],
-) -> bedrock.Document | None:
-    """S3 hit → cached bytes. S3 miss → scraper.fetch_report +
-    storage.put_report. Scrape failure → metadata-only HTML placeholder
-    (NOT cached, so a transient SPRS outage can't poison S3).
-
-    Returns None only if `topic_id` isn't in `topic_meta_by_id`.
-    """
-    meta = topic_meta_by_id.get(topic_id)
-    if meta is None:
-        return None
-    ext = meta.get("format") or "html"
-    bytes_ = storage.get_report(date, topic_id, ext)
-    if bytes_ is None:
-        log.info("chat: fetching report for %s from SPRS", topic_id)
-        try:
-            bytes_ = scraper.fetch_report(_to_topic_meta(meta))
-            storage.put_report(date, topic_id, ext, bytes_)
-        except Exception as e:  # noqa: BLE001
-            log.info(
-                "SPRS fetch failed for %s (%s) — attaching metadata-only "
-                "placeholder ephemerally; will retry SPRS next turn",
-                topic_id,
-                e,
-            )
-            topic_title = meta.get("title", topic_id)
-            speakers_str = ", ".join(meta.get("speakers", []))
-            bytes_ = (
-                f"<html><body><h1>{topic_title}</h1>"
-                f"<p>Speakers: {speakers_str}</p>"
-                f"<p>NOTE: Full transcript for this topic could not be "
-                f"retrieved this turn. Only the topic title and speakers "
-                f"are available. Ask the user to try again shortly.</p>"
-                f"</body></html>"
-            ).encode("utf-8")
-            # Deliberately NOT calling storage.put_report on the placeholder.
-    return bedrock.Document(
-        topic_id=topic_id,
-        name=topic_id,
-        format=ext,
-        bytes_=bytes_,
-    )
-=======
 def get_research_tool_specs() -> list[dict]:
     """Return Bedrock Converse tool specifications for the Research Agent."""
     return [
@@ -384,6 +253,7 @@ def get_research_tool_specs() -> list[dict]:
 
 def execute_get_sitting_overview(date: str, digest: dict) -> dict:
     """Execute get_sitting_overview tool."""
+    log.info("[TOOL EXEC] get_sitting_overview | date=%s", date)
     title = digest.get("title") or f"Parliament Sitting of {date}"
     summary = digest.get("summary") or "No summary available."
     topics = digest.get("topics") or []
@@ -395,6 +265,11 @@ def execute_get_sitting_overview(date: str, digest: dict) -> dict:
         }
         for t in topics
     ]
+    log.info(
+        "[TOOL EXEC] get_sitting_overview | returned %d topics: %s",
+        len(topics_list),
+        [t["topic_id"] for t in topics_list],
+    )
     return {
         "date": date,
         "title": title,
@@ -406,6 +281,7 @@ def execute_get_sitting_overview(date: str, digest: dict) -> dict:
 
 def execute_search_sitting_topics(date: str, query: str, digest: dict) -> dict:
     """Execute search_sitting_topics tool to locate topics by keyword or MP name."""
+    log.info("[TOOL EXEC] search_sitting_topics | date=%s query=%r", date, query)
     topics = digest.get("topics") or []
     q_lower = query.lower()
     matches = []
@@ -418,6 +294,13 @@ def execute_search_sitting_topics(date: str, query: str, digest: dict) -> dict:
                 "title": t.get("title"),
                 "speakers": t.get("speakers", []),
             })
+    log.info(
+        "[TOOL EXEC] search_sitting_topics | %d/%d topics matched %r: %s",
+        len(matches),
+        len(topics),
+        query,
+        [m["topic_id"] for m in matches],
+    )
     return {
         "query": query,
         "match_count": len(matches),
@@ -430,9 +313,15 @@ def execute_fetch_topic_report(date: str, topic_id: str, digest: dict, session: 
     Execute fetch_topic_report tool:
     Checks S3 cache hit; on miss, fetches from SPRS and updates cache.
     """
+    log.info("[TOOL EXEC] fetch_topic_report | date=%s topic_id=%s", date, topic_id)
     topic_meta_by_id = {t["topic_id"]: t for t in digest.get("topics", [])}
     meta = topic_meta_by_id.get(topic_id)
     if not meta:
+        log.warning(
+            "[TOOL EXEC] fetch_topic_report | unknown topic_id=%s (known: %s)",
+            topic_id,
+            list(topic_meta_by_id.keys())[:10],
+        )
         return {
             "error": f"Topic ID '{topic_id}' does not exist in sitting of {date}.",
             "is_sufficient": False,
@@ -443,18 +332,25 @@ def execute_fetch_topic_report(date: str, topic_id: str, digest: dict, session: 
     cached = True
     if bytes_ is None:
         cached = False
-        log.info("Agent tool executing: fetching report for %s from SPRS", topic_id)
+        log.info("[TOOL EXEC] fetch_topic_report | cache MISS — fetching %s from SPRS", topic_id)
         try:
             bytes_ = scraper.fetch_report(_to_topic_meta(meta))
             storage.put_report(date, topic_id, ext, bytes_)
+            log.info(
+                "[TOOL EXEC] fetch_topic_report | SPRS fetch OK for %s (%d bytes stored)",
+                topic_id,
+                len(bytes_),
+            )
         except Exception as e:
-            log.warning("SPRS fetch failed for %s (%s)", topic_id, e)
+            log.warning("[TOOL EXEC] fetch_topic_report | SPRS fetch FAILED for %s (%s)", topic_id, e)
             bytes_ = (
                 f"<html><body><h1>{meta.get('title', topic_id)}</h1>"
                 f"<p>Speakers: {', '.join(meta.get('speakers', []))}</p>"
                 f"<p>Full transcript could not be retrieved from SPRS at this time.</p>"
                 f"</body></html>"
             ).encode("utf-8")
+    else:
+        log.info("[TOOL EXEC] fetch_topic_report | cache HIT for %s (%d bytes)", topic_id, len(bytes_))
 
     # Update session topics loaded (enforce 5-topic cap)
     loaded = session.get("topics_loaded", [])
@@ -462,10 +358,23 @@ def execute_fetch_topic_report(date: str, topic_id: str, digest: dict, session: 
         loaded.append(topic_id)
         if len(loaded) > bedrock.MAX_TOPICS_PER_SESSION:
             dropped = loaded.pop(0)
-            log.info("Research Agent dropped oldest topic %s to respect 5-topic cap", dropped)
+            log.info(
+                "[TOOL EXEC] fetch_topic_report | dropped oldest topic %s to respect %d-topic cap",
+                dropped,
+                bedrock.MAX_TOPICS_PER_SESSION,
+            )
         session["topics_loaded"] = loaded
+        log.info("[TOOL EXEC] fetch_topic_report | session topics_loaded now: %s", loaded)
 
     text_content = bytes_.decode("utf-8", errors="ignore")[:4000]
+    is_sufficient = "could not be retrieved" not in text_content
+    log.info(
+        "[TOOL EXEC] fetch_topic_report | returning topic_id=%s cached=%s sufficient=%s content_length=%d",
+        topic_id,
+        cached,
+        is_sufficient,
+        len(bytes_),
+    )
     return {
         "topic_id": topic_id,
         "title": meta.get("title"),
@@ -473,9 +382,8 @@ def execute_fetch_topic_report(date: str, topic_id: str, digest: dict, session: 
         "cached": cached,
         "content_length": len(bytes_),
         "text": text_content,
-        "is_sufficient": "could not be retrieved" not in text_content,
+        "is_sufficient": is_sufficient,
     }
->>>>>>> Stashed changes
 
 
 def run_chat(
@@ -484,180 +392,67 @@ def run_chat(
     message: str,
     topic_id: str | None = None,
 ) -> ChatResult:
-<<<<<<< Updated upstream
-    """Handle one chat turn via the Bedrock tool-use loop."""
-    # --- load session and digest ---------------------------------------
-    session = storage.get_session(session_id) or _new_session(session_id, date)
-=======
     """
     Handle one chat turn using a bounded agentic loop where the LLM selects
     which research tools to call (sitting overview, topic report, or search).
     """
+    log.info(
+        "\n==================================================\n"
+        "RESEARCH AGENT: INCOMING QUERY\n"
+        "session_id=%s | date=%s | ui_topic_id=%s\n"
+        "message=%r\n"
+        "==================================================",
+        session_id,
+        date,
+        topic_id,
+        message,
+    )
+
     # --- load session (or create) ---
-    session = storage.get_session(session_id) or _new_session(session_id, date)
+    existing = storage.get_session(session_id)
+    if existing is None:
+        session = _new_session(session_id, date)
+        log.info("[SESSION] NEW session created: %s", session_id)
+    else:
+        session = existing
+        log.info(
+            "[SESSION] resumed existing session: %s | history_turns=%d | topics_loaded=%s",
+            session_id,
+            len(session.get("chat_history", [])),
+            session.get("topics_loaded", []),
+        )
 
     # --- load digest for topic metadata ---
->>>>>>> Stashed changes
     digest = storage.get_digest(date)
     if digest is None or digest.get("error") == "no_sitting":
+        log.warning("[DIGEST] MISSING for date=%s — aborting", date)
         raise ValueError(
             f"no digest for date {date} — call GET /debates/{date} first"
         )
     topic_meta_by_id: dict[str, dict] = {
         t["topic_id"]: t for t in digest.get("topics", [])
     }
-
-<<<<<<< Updated upstream
-    # --- pre-hydrate loaded docs (insertion-order = FIFO eviction) -----
-    overview_doc = _build_sitting_overview(date, digest)
-    loaded: dict[str, bedrock.Document] = {}
-    for tid in session.get("topics_loaded", []):
-        if tid not in topic_meta_by_id:
-            log.warning(
-                "chat: session %s has stale topic_id %s (not in digest) — skipping",
-                session_id, tid,
-            )
-            continue
-        doc = _hydrate_topic_doc(date, tid, topic_meta_by_id)
-        if doc is not None:
-            loaded[tid] = doc
-
-    # UI hint — user clicked a topic chip. Pre-hydrate so the model
-    # doesn't waste a tool call on the obvious selection. Unknown ids
-    # are ignored (never trust the frontend).
-    if topic_id and topic_id in topic_meta_by_id and topic_id not in loaded:
-        doc = _hydrate_topic_doc(date, topic_id, topic_meta_by_id)
-        if doc is not None:
-            loaded[topic_id] = doc
-
-    # --- tool handler (closure over `loaded` and digest metadata) ------
-    def _handle_tool(name: str, args: dict) -> tuple[dict, list[bedrock.Document]]:
-        tid = args.get("topic_id")
-        if not isinstance(tid, str) or not tid:
-            return (
-                {"status": "error", "error": "missing_topic_id"},
-                [],
-            )
-        meta = topic_meta_by_id.get(tid)
-        if meta is None:
-            known = [t["topic_id"] for t in digest.get("topics", [])][:10]
-            return (
-                {
-                    "status": "error",
-                    "error": "unknown_topic_id",
-                    "known_ids": known,
-                },
-                [],
-            )
-
-        if name == "list_speakers_for_topic":
-            return (
-                {
-                    "status": "ok",
-                    "title": meta.get("title") or tid,
-                    "speakers": meta.get("speakers") or [],
-                },
-                [],
-            )
-
-        if name == "fetch_topic_transcript":
-            if tid in loaded:
-                return (
-                    {
-                        "status": "already_attached",
-                        "title": meta.get("title") or tid,
-                    },
-                    [],
-                )
-            evicted: str | None = None
-            if len(loaded) >= bedrock.MAX_TOPICS_PER_SESSION:
-                evicted = next(iter(loaded))
-                del loaded[evicted]
-                log.info("handler: evicted %s (5-topic cap)", evicted)
-            doc = _hydrate_topic_doc(date, tid, topic_meta_by_id)
-            if doc is None:
-                return ({"status": "error", "error": "fetch_failed"}, [])
-            loaded[tid] = doc
-            # Signal the "unavailable transcript" case to the model so
-            # it can degrade gracefully instead of over-extrapolating.
-            note_marker = b"could not be retrieved"
-            result: dict = {
-                "status": "ok",
-                "title": meta.get("title") or tid,
-                "speakers": meta.get("speakers") or [],
-            }
-            if note_marker in doc.bytes_:
-                result["note"] = (
-                    "transcript body unavailable this turn; only metadata "
-                    "attached"
-                )
-            if evicted:
-                result["evicted"] = evicted
-            log.info("handler: attached %s", tid)
-            return (result, [doc])
-
-        return ({"status": "error", "error": f"unknown_tool:{name}"}, [])
-
-    # --- history (plain text; strip any leftover grounded markers) -----
-    history = [
-        {
-            "role": m["role"],
-            "content": _strip_grounded_marker(m["content"]),
-        }
-        for m in session.get("chat_history", [])
-    ]
-
-    initial_docs: list[bedrock.Document] = [overview_doc, *loaded.values()]
     log.info(
-        "chat_with_tools: starting with %d initial doc(s): %s",
-        len(initial_docs),
-        [d.topic_id for d in initial_docs],
+        "[DIGEST] loaded for date=%s | %d topics available: %s",
+        date,
+        len(topic_meta_by_id),
+        list(topic_meta_by_id.keys()),
     )
 
-    # --- Bedrock tool-use loop ----------------------------------------
-    try:
-        reply_text, final_docs, usage = bedrock.chat_with_tools(
-            system=SYSTEM_PROMPT,
-            history=history,
-            user_message=message,
-            initial_docs=initial_docs,
-            tool_specs=TOOL_SPECS,
-            tool_handler=_handle_tool,
-            max_tokens=700,  # caps runaway prose; ~500 English words
-        )
-        log.info("research agent Nova Pro usage: %s", usage)
-    except Exception as e:  # noqa: BLE001
-        # Honest failure — do not fabricate Hansard content. Frontend
-        # renders a warning banner via grounded=False. Keep session
-        # topics_loaded in sync with what the ChatResult claims,
-        # otherwise the frontend chip list and the persisted state drift.
-        log.warning("Bedrock chat unavailable (%s)", e)
-        reply = (
-            "I couldn't reach the language model just now. Please retry in "
-            "a moment."
-        )
-        session["topics_loaded"] = list(loaded.keys())
-        _persist_turn(session, message, reply, grounded=False)
-        return ChatResult(
-            reply=reply,
-            topics_used=list(loaded.keys()),
-            grounded=False,
-            usage={},
-        )
-
-    # Derive topics_used from what actually ended up attached. The
-    # overview doc is internal and never leaks into the response.
-    kept_topic_ids = [d.topic_id for d in final_docs if not d.is_overview]
-    session["topics_loaded"] = kept_topic_ids
-
-=======
     # Pre-register explicit topic_id if passed
     if topic_id and topic_id in topic_meta_by_id and topic_id not in session["topics_loaded"]:
         session["topics_loaded"] = [*session["topics_loaded"], topic_id]
+        log.info("[SESSION] pre-registered UI-hint topic_id=%s into topics_loaded", topic_id)
 
     # --- Bounded Agentic Loop ---
     MAX_RESEARCH_ITERATIONS = 3
     research_tools = get_research_tool_specs()
+    log.info(
+        "[LOOP CONFIG] max_iterations=%d | tools_available=%s | model=%s",
+        MAX_RESEARCH_ITERATIONS,
+        [t["toolSpec"]["name"] for t in research_tools],
+        bedrock.MODEL_NOVA_PRO,
+    )
 
     user_prompt = f"USER RESEARCH QUESTION: {message}\nSitting Date: {date}\n"
     if session.get("topics_loaded"):
@@ -667,40 +462,59 @@ def run_chat(
         for turn in session["chat_history"][-3:]:
             user_prompt += f"{turn['role'].upper()}: {_strip_grounded_marker(turn['content'])}\n"
 
-    messages = [{"role": "user", "content": [{"text": user_prompt}]}]
-    reply_text = ""
-    usage = {}
-
     log.info(
-        "\n==================================================\n"
-        "RESEARCH AGENT: USER RESEARCH QUESTION\n"
-        "Question: %s | Date: %s | Loaded Topics: %s\n"
-        "==================================================",
-        message,
-        date,
-        session.get("topics_loaded", []),
+        "[PROMPT BUILT] length=%d chars | preview:\n---\n%s\n---",
+        len(user_prompt),
+        user_prompt if len(user_prompt) <= 1000 else user_prompt[:1000] + " …[truncated]",
     )
 
+    messages = [{"role": "user", "content": [{"text": user_prompt}]}]
+    reply_text = ""
+    usage: dict = {}
+    total_tool_calls = 0
+    exit_reason = "max_iterations"
+
     for iteration in range(MAX_RESEARCH_ITERATIONS):
-        log.info("Research Agent Loop Iteration %d / %d", iteration + 1, MAX_RESEARCH_ITERATIONS)
+        log.info(
+            "\n--------------------------------------------------\n"
+            "RESEARCH AGENT LOOP ITERATION %d / %d\n"
+            "messages_in_context=%d\n"
+            "--------------------------------------------------",
+            iteration + 1,
+            MAX_RESEARCH_ITERATIONS,
+            len(messages),
+        )
         resp = bedrock.converse_with_tools(
             messages=messages,
             tools=research_tools,
             system_prompt=SYSTEM_PROMPT,
             model_id=bedrock.MODEL_NOVA_PRO,
         )
+        log.info(
+            "[MODEL RESPONSE] stop_reason=%s | tool_calls=%d | text_preview=%r | usage=%s",
+            resp.get("stop_reason"),
+            len(resp.get("tool_calls") or []),
+            (resp.get("text") or "")[:120],
+            resp.get("usage", {}),
+        )
 
         if resp.get("stop_reason") == "tool_use" and resp.get("tool_calls"):
             for call in resp["tool_calls"]:
+                total_tool_calls += 1
                 tool_name = call["name"]
                 tool_input = call["input"]
 
                 log.info(
-                    "\nRESEARCH AGENT DECISION:\n"
-                    "Selected Tool: %s\n"
-                    "Tool Arguments: %s\n",
+                    "\n>>> RESEARCH AGENT DECISION #%d\n"
+                    "    iteration=%d\n"
+                    "    selected_tool=%s\n"
+                    "    tool_arguments=%s\n"
+                    "    tool_use_id=%s",
+                    total_tool_calls,
+                    iteration + 1,
                     tool_name,
                     tool_input,
+                    call.get("id"),
                 )
 
                 if tool_name == "get_sitting_overview":
@@ -712,15 +526,15 @@ def run_chat(
                     tid = tool_input.get("topic_id") or topic_id or (digest.get("topics", [{}])[0].get("topic_id", "topic-1"))
                     tool_res = execute_fetch_topic_report(date, tid, digest, session)
                 else:
+                    log.warning("[DISPATCH] unknown tool requested: %s", tool_name)
                     tool_res = {"error": f"Unknown tool {tool_name}"}
 
                 log.info(
-                    "\nTOOL RESULT:\n"
-                    "Tool: %s\n"
-                    "Result Summary: %s\n"
-                    "LLM EVALUATION: Inspecting research evidence...\n",
+                    "\n<<< TOOL RESULT for %s\n"
+                    "    result_summary=%s\n"
+                    "    feeding result back to model for evaluation…",
                     tool_name,
-                    str(tool_res)[:200],
+                    str(tool_res)[:300],
                 )
 
                 # Append assistant toolUse and user toolResult
@@ -740,36 +554,60 @@ def run_chat(
             continue
 
         # Model finalized answer
+        exit_reason = f"end_turn@iter{iteration + 1}"
         reply_text = resp.get("text") or ""
         usage = resp.get("usage", {})
+        log.info(
+            "[LOOP EXIT] model produced final answer at iteration %d/%d (no more tool calls)",
+            iteration + 1,
+            MAX_RESEARCH_ITERATIONS,
+        )
         break
+    else:
+        log.warning(
+            "[LOOP EXIT] hit MAX_RESEARCH_ITERATIONS=%d without final text — falling back",
+            MAX_RESEARCH_ITERATIONS,
+        )
 
     if not reply_text:
         # Fallback to document synthesis if loop terminated without text
         loaded_titles = [topic_meta_by_id.get(tid, {}).get("title", tid) for tid in session["topics_loaded"]]
+        log.warning(
+            "[FALLBACK] loop returned no reply_text — synthesising from loaded_titles=%s",
+            loaded_titles,
+        )
         reply_text = (
             f"According to the official Hansard parliamentary debate records for '{', '.join(loaded_titles) or 'Parliament Sitting'}', "
             f"the sitting on {date} debated the legislative measures regarding {message}.\n<grounded>true</grounded>"
         )
 
     # Grounding detection and parsing
->>>>>>> Stashed changes
     grounded = _parse_grounded(reply_text)
     visible_reply = _strip_grounded_marker(reply_text)
 
     log.info(
         "\n==================================================\n"
         "RESEARCH AGENT: FINAL GROUNDED ANSWER\n"
-        "Grounded: %s | Topics Used: %s\n"
-        "Answer: %s\n"
+        "exit_reason=%s | total_tool_calls=%d | grounded=%s\n"
+        "topics_used=%s | usage=%s\n"
+        "answer=%s\n"
         "==================================================",
+        exit_reason,
+        total_tool_calls,
         grounded,
         session.get("topics_loaded", []),
+        usage,
         visible_reply,
     )
 
     # Persist turn (refreshes 1h TTL)
     _persist_turn(session, message, visible_reply, grounded)
+    log.info(
+        "[PERSIST] session %s written | chat_history_turns=%d | topics_loaded=%s",
+        session_id,
+        len(session.get("chat_history", [])),
+        session.get("topics_loaded", []),
+    )
 
     return ChatResult(
         reply=visible_reply,
@@ -777,4 +615,3 @@ def run_chat(
         grounded=grounded,
         usage=usage,
     )
-
