@@ -1,8 +1,13 @@
 import { useState } from "react";
-import { Search, ExternalLink, ListFilter, Users } from "lucide-react";
+import { Search, ExternalLink, ListFilter, Users, Layers } from "lucide-react";
 import type { Topic } from "../types";
 
-export default function TopicList({ topics }: { topics: Topic[] }) {
+interface Props {
+  topics: Topic[];
+  onGenerateFlashcards?: (topic: Topic) => void;
+}
+
+export default function TopicList({ topics, onGenerateFlashcards }: Props) {
   const [filter, setFilter] = useState("");
   const q = filter.toLowerCase().trim();
   const filtered = q
@@ -70,17 +75,30 @@ export default function TopicList({ topics }: { topics: Topic[] }) {
               </div>
             </div>
 
-            {t.source_url && (
-              <a
-                href={t.source_url}
-                target="_blank"
-                rel="noreferrer"
-                className="shrink-0 text-stone-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-stone-100 transition"
-                title="View original Hansard SPRS source transcript"
-              >
-                <ExternalLink className="w-4 h-4" />
-              </a>
-            )}
+            <div className="shrink-0 flex items-center gap-0.5">
+              {onGenerateFlashcards && (
+                <button
+                  type="button"
+                  onClick={() => onGenerateFlashcards(t)}
+                  className="text-stone-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-stone-100 transition cursor-pointer"
+                  title="Generate flashcards for this topic"
+                  aria-label="Generate flashcards"
+                >
+                  <Layers className="w-4 h-4" />
+                </button>
+              )}
+              {t.source_url && (
+                <a
+                  href={t.source_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-stone-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-stone-100 transition"
+                  title="View original Hansard SPRS source transcript"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              )}
+            </div>
           </div>
         ))}
       </div>

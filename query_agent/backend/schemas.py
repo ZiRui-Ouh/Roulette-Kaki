@@ -30,6 +30,23 @@ class SearchQueries(BaseModel):
     community: List[str] = Field(default_factory=list, description="Targeted queries for public forums (Reddit, HardwareZone)")
 
 
+FlashcardSource = Literal["topic", "chat"]
+
+
+class Flashcard(BaseModel):
+    id: str = Field(..., description="Stable UUID minted server-side so the client can dedupe on save")
+    title: str = Field(..., description="Short noun-phrase headline, roughly 3-8 words")
+    body: str = Field(..., description="1-3 sentence summary explaining the point")
+
+
+class FlashcardDeck(BaseModel):
+    date: str = Field(..., description="Sitting date the deck is anchored to")
+    topic_id: Optional[str] = Field(default=None, description="Source topic when generated from a Hansard topic; null for chat-derived decks")
+    source: FlashcardSource = Field(..., description="Where the deck was generated from")
+    cards: List[Flashcard] = Field(default_factory=list)
+    generated_at: str = Field(..., description="ISO-8601 UTC timestamp when the deck was minted")
+
+
 class MainAgentPlan(BaseModel):
     intent: IntentType = Field(..., description="Classified intent of the question")
     topic: str = Field(..., description="Primary policy or legislative subject, e.g. BTO, CPF, MediShield")

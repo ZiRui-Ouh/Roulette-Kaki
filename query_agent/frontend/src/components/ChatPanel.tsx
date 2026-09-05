@@ -5,13 +5,14 @@ import { loadDebateSession, saveDebateSession } from "../session";
 import { useLanguage } from "../contexts/LanguageContext";
 import type { ChatMessage, Digest } from "../types";
 import TopicSelector from "./TopicSelector";
-import { Sparkles, Bot, AlertCircle, X, Send, ShieldCheck, HelpCircle } from "lucide-react";
+import { Sparkles, Bot, AlertCircle, X, Send, ShieldCheck, HelpCircle, Layers } from "lucide-react";
 
 interface Props {
   digest: Digest;
+  onSaveReplyAsFlashcards?: (replyText: string, topicIdsUsed: string[]) => void;
 }
 
-export default function ChatPanel({ digest }: Props) {
+export default function ChatPanel({ digest, onSaveReplyAsFlashcards }: Props) {
   const { language } = useLanguage();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [topicIds, setTopicIds] = useState<string[]>([]);
@@ -201,7 +202,15 @@ export default function ChatPanel({ digest }: Props) {
         )}
 
         {messages.map((m, i) => (
-          <MessageBubble key={i} m={m} />
+          <MessageBubble
+            key={i}
+            m={m}
+            onSaveAsFlashcards={
+              onSaveReplyAsFlashcards
+                ? () => onSaveReplyAsFlashcards(m.content, topicIds)
+                : undefined
+            }
+          />
         ))}
 
         {busy && (
@@ -276,7 +285,13 @@ export default function ChatPanel({ digest }: Props) {
   );
 }
 
-function MessageBubble({ m }: { m: ChatMessage }) {
+function MessageBubble({
+  m,
+  onSaveAsFlashcards,
+}: {
+  m: ChatMessage;
+  onSaveAsFlashcards?: () => void;
+}) {
   const isUser = m.role === "user";
   return (
     <div className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}>
@@ -299,6 +314,17 @@ function MessageBubble({ m }: { m: ChatMessage }) {
         <div className="mt-1 text-[10px] text-amber-700 flex items-center gap-1 font-medium px-1">
           <span>⚠️ The parliamentary report does not cover this inquiry.</span>
         </div>
+      )}
+      {!isUser && onSaveAsFlashcards && m.content.trim().length > 0 && (
+        <button
+          type="button"
+          onClick={onSaveAsFlashcards}
+          className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-stone-500 hover:text-indigo-600 px-1 cursor-pointer transition"
+          title="Condense this reply into flashcards"
+        >
+          <Layers className="w-3 h-3" />
+          Save as flashcards
+        </button>
       )}
     </div>
   );

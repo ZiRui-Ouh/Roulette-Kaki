@@ -3,6 +3,7 @@ import type {
   ChatResponse,
   DebateSummary,
   Digest,
+  FlashcardDeck,
   Lang,
   Sitting,
 } from "./types";
@@ -113,4 +114,45 @@ export function sendChat(
     method: "POST",
     body: JSON.stringify({ language: "English", ...body }),
   });
+}
+
+/**
+ * Flashcards agent — condenses either a Hansard topic transcript or a
+ * research-agent assistant reply into a deck of single-sided summary
+ * cards. Response is returned in-memory; persistence is client-side via
+ * session.ts helpers.
+ */
+export function generateTopicFlashcards(
+  date: string,
+  topicId: string,
+  count = 5,
+): Promise<FlashcardDeck> {
+  return request(
+    BLOGPOST_API_BASE,
+    `/debates/${encodeURIComponent(date)}/flashcards/topic/${encodeURIComponent(topicId)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ count }),
+    },
+  );
+}
+
+export function generateChatFlashcards(
+  date: string,
+  replyText: string,
+  topicIds?: string[],
+  count = 5,
+): Promise<FlashcardDeck> {
+  return request(
+    BLOGPOST_API_BASE,
+    `/debates/${encodeURIComponent(date)}/flashcards/from-chat`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        reply_text: replyText,
+        topic_ids: topicIds,
+        count,
+      }),
+    },
+  );
 }

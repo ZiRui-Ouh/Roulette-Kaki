@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getDigest } from "../api";
 import { useLanguage } from "../contexts/LanguageContext";
-import type { Digest } from "../types";
+import type { Digest, Topic } from "../types";
 import ChatPanel from "../components/ChatPanel";
 import DigestSummary from "../components/DigestSummary";
+import FlashcardDrawer, { type DrawerSource } from "../components/FlashcardDrawer";
 import InterestingTopics from "../components/InterestingTopics";
 import TopicList from "../components/TopicList";
 import YoutubeThumbnail from "../components/YoutubeThumbnail";
@@ -15,6 +16,28 @@ export default function DetailPage() {
   const { language } = useLanguage();
   const [digest, setDigest] = useState<Digest | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [flashcardSource, setFlashcardSource] = useState<DrawerSource | null>(null);
+
+  const openFromTopic = useCallback((t: Topic) => {
+    setFlashcardSource({
+      kind: "topic",
+      topicId: t.topic_id,
+      topicTitle: t.title,
+    });
+  }, []);
+
+  const openFromChat = useCallback(
+    (replyText: string, topicIdsUsed: string[]) => {
+      setFlashcardSource({
+        kind: "chat",
+        replyText,
+        topicIds: topicIdsUsed,
+      });
+    },
+    [],
+  );
+
+  const closeDrawer = useCallback(() => setFlashcardSource(null), []);
 
   useEffect(() => {
     if (!date) return;
@@ -106,14 +129,21 @@ export default function DetailPage() {
           )}
           <DigestSummary digest={digest} />
           <InterestingTopics digest={digest} />
-          <TopicList topics={digest.topics} />
+          <TopicList topics={digest.topics} onGenerateFlashcards={openFromTopic} />
         </div>
 
         {/* Sticky Research Assistant Sidebar */}
         <aside className="lg:sticky lg:top-20 lg:self-start space-y-6">
-          <ChatPanel digest={digest} />
+          <ChatPanel digest={digest} onSaveReplyAsFlashcards={openFromChat} />
         </aside>
       </div>
+
+      <FlashcardDrawer
+        open={flashcardSource !== null}
+        date={digest.date}
+        source={flashcardSource}
+        onClose={closeDrawer}
+      />
     </div>
   );
 }

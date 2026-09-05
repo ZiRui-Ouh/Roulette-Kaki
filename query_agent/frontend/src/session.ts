@@ -1,4 +1,4 @@
-import type { ChatMessage, Lang } from "./types";
+import type { ChatMessage, Lang, SavedDeck } from "./types";
 
 export interface StoredSession {
   session_id: string;
@@ -68,4 +68,65 @@ export function saveQueryMessages(
 
 export function clearQueryMessages(language: Lang = "English"): void {
   localStorage.removeItem(queryChatKey(language));
+}
+
+// Flashcards saved per sitting per language, mirroring the chat bucket
+// convention so a language flip doesn't mix scripts inside one deck list.
+const flashcardsKey = (date: string, language: Lang) =>
+  language === "English"
+    ? `flashcards:${date}`
+    : `flashcards:${date}:${language}`;
+
+export function loadSavedDecks(
+  date: string,
+  language: Lang = "English",
+): SavedDeck[] {
+  try {
+    const raw = localStorage.getItem(flashcardsKey(date, language));
+    return raw ? (JSON.parse(raw) as SavedDeck[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveDeck(
+  date: string,
+  deck: SavedDeck,
+  language: Lang = "English",
+): SavedDeck[] {
+  const current = loadSavedDecks(date, language);
+  const cardKey = deck.cards.map((c) => c.id).join("|");
+  const existing = current.some(
+    (d) => d.cards.map((c) => c.id).join("|") === cardKey,
+  );
+  const next = existing ? current : [deck, ...current];
+  try {
+    localStorage.setItem(flashcardsKey(date, language), JSON.stringify(next));
+  } catch {
+    // Storage disabled or full — ignore.
+  }
+  return next;
+}
+
+export function deleteDeck(
+  date: string,
+  savedAt: number,
+  language: Lang = "English",
+): SavedDeck[] {
+  const next = loadSavedDecks(date, language).filter(
+    (d) => d.savedAt !== savedAt,
+  );
+  try {
+    localStorage.setItem(flashcardsKey(date, language), JSON.stringify(next));
+  } catch {
+    // Storage disabled or full — ignore.
+  }
+  return next;
+}
+
+export function clearSavedDecks(
+  date: string,
+  language: Lang = "English",
+): void {
+  localStorage.removeItem(flashcardsKey(date, language));
 }

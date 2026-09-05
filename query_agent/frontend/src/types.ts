@@ -64,6 +64,27 @@ export interface ChatResponse {
   grounded: boolean;
 }
 
+export interface Flashcard {
+  id: string;
+  title: string;
+  body: string;
+}
+
+export type FlashcardSource = "topic" | "chat";
+
+export interface FlashcardDeck {
+  date: string;
+  topic_id?: string | null;
+  source: FlashcardSource;
+  cards: Flashcard[];
+  generated_at: string;
+}
+
+export interface SavedDeck extends FlashcardDeck {
+  savedAt: number;
+  topicTitle?: string;
+}
+
 export interface ApiError {
   status: number;
   error: string;

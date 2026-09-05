@@ -40,6 +40,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from agents import digest as digest_agent
+from agents import flashcards as flashcards_agent
 from agents import research as research_agent
 from agents.main_agent import create_search_plan
 from agents.query import answer_question
@@ -138,6 +139,30 @@ class ChatResponse(BaseModel):
     grounded: bool
 
 
+class TopicFlashcardsRequest(BaseModel):
+    count: int = 5
+
+
+class ChatFlashcardsRequest(BaseModel):
+    reply_text: str
+    topic_ids: list[str] | None = None
+    count: int = 5
+
+
+class FlashcardModel(BaseModel):
+    id: str
+    title: str
+    body: str
+
+
+class FlashcardDeckResponse(BaseModel):
+    date: str
+    topic_id: Optional[str] = None
+    source: Literal["topic", "chat"]
+    cards: list[FlashcardModel]
+    generated_at: str
+
+
 # --- Root & Health -----------------------------------------------------------
 
 @app.get("/")
@@ -154,6 +179,8 @@ def root() -> dict:
             "GET  /debates",
             "GET  /debates/{date}",
             "POST /debates/{date}/chat",
+            "POST /debates/{date}/flashcards/topic/{topic_id}",
+            "POST /debates/{date}/flashcards/from-chat",
             "POST /translate",
             "POST /transcribe",
             "POST /translate/audio",
@@ -493,6 +520,74 @@ def chat_debate(date: str, req: ChatRequest) -> ChatResponse:
         topics_used=captured["topics_used"],
         grounded=captured["grounded"],
     )
+
+
+# --- Flashcards Agent --------------------------------------------------------
+
+@app.post(
+    "/debates/{date}/flashcards/topic/{topic_id}",
+    response_model=FlashcardDeckResponse,
+)
+def flashcards_from_topic(
+    date: str,
+    topic_id: str,
+    req: TopicFlashcardsRequest,
+) -> FlashcardDeckResponse:
+    digest = storage_service.get_digest(date)
+    if not digest or (isinstance(digest, dict) and digest.get("error") == "no_sitting"):
+        # Materialise the digest on demand so a cold cache doesn't 404 the
+        # first flashcard click after a fresh start.
+        try:
+            digest = digest_agent.run_digest(date)
+        except NotImplementedError as e:
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "digest_agent_unavailable", "message": str(e)},
+            )
+        if isinstance(digest, dict) and digest.get("error") == "no_sitting":
+            raise HTTPException(status_code=404, detail=digest)
+
+    try:
+        deck = flashcards_agent.generate_from_topic(
+            date=date,
+            topic_id=topic_id,
+            digest=digest,
+            count=req.count,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "bad_topic_id", "message": str(e)},
+        )
+    except NotImplementedError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "scraper_not_available", "message": str(e)},
+        )
+    return FlashcardDeckResponse(**deck.model_dump())
+
+
+@app.post(
+    "/debates/{date}/flashcards/from-chat",
+    response_model=FlashcardDeckResponse,
+)
+def flashcards_from_chat(
+    date: str,
+    req: ChatFlashcardsRequest,
+) -> FlashcardDeckResponse:
+    try:
+        deck = flashcards_agent.generate_from_chat_reply(
+            date=date,
+            reply_text=req.reply_text,
+            topic_ids=req.topic_ids,
+            count=req.count,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "bad_reply_text", "message": str(e)},
+        )
+    return FlashcardDeckResponse(**deck.model_dump())
 
 
 # --- Standalone Translation Endpoints ----------------------------------------
