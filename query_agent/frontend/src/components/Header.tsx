@@ -20,9 +20,9 @@ export default function Header() {
               SG
             </div>
             <div>
-              <span className="font-bold">Roulette Kaki</span>
+              <span className="font-bold">The Singapore Chronicles</span>
               <span className="text-xs font-normal text-slate-400 ml-2 hidden md:inline">
-                Singapore Policy & Debate Hub
+                Singapore Policy & Debate Intelligence
               </span>
             </div>
           </Link>

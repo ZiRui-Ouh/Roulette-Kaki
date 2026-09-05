@@ -190,8 +190,6 @@ def _to_topic_meta(digest_topic: dict) -> TopicMeta:
     )
 
 
-<<<<<<< Updated upstream
-=======
 def _hydrate_topic_doc(
     date: str,
     topic_id: str,
@@ -239,7 +237,6 @@ def _hydrate_topic_doc(
     )
 
 
->>>>>>> Stashed changes
 def get_research_tool_specs() -> list[dict]:
     """Return Bedrock Converse tool specifications for the Research Agent."""
     return [
@@ -482,15 +479,12 @@ def run_chat(
     topic_meta_by_id: dict[str, dict] = {
         t["topic_id"]: t for t in digest.get("topics", [])
     }
-<<<<<<< Updated upstream
     log.info(
         "[DIGEST] loaded for date=%s | %d topics available: %s",
         date,
         len(topic_meta_by_id),
         list(topic_meta_by_id.keys()),
     )
-=======
->>>>>>> Stashed changes
 
     # Pre-register explicit topic_id if passed
     if topic_id and topic_id in topic_meta_by_id and topic_id not in session["topics_loaded"]:

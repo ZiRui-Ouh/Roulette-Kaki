@@ -37,7 +37,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <div className="font-serif font-black text-sm text-stone-800 tracking-tight">
-              THE SINGAPORE POLICY CHRONICLE
+              THE SINGAPORE CHRONICLES
             </div>
             <div className="text-[11px] text-stone-400 mt-0.5">
               Empowering citizens with transparent, AI-verified public policy &amp; legislative intelligence.

@@ -38,17 +38,17 @@ export default function PolicyArticlePage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Helper to construct a clean interactive concierge greeting for the chatbot
+  const getInitialConciergeMessage = (title: string, ministry: string): ChatMessage => ({
+    role: "assistant",
+    content: `👋 **Welcome to the Policy Intelligence Concierge.**\n\nI have indexed the official government gazettes, circulars, and rules for **${title}** (${ministry}).\n\nAsk me any question below regarding your eligibility, income ceilings, grant calculations, resale restrictions, or MOP rules — or select a suggested inquiry below to get started!`,
+    timestamp: Date.now(),
+  });
 
-  // Initialize chat messages with the policy's initial executive briefing
+  // Initialize chat messages with clean concierge greeting (briefing is rendered outside the chatbot)
   useEffect(() => {
     if (policy) {
-      setMessages([
-        {
-          role: "assistant",
-          content: policy.initialBriefing,
-          timestamp: Date.now(),
-        },
-      ]);
+      setMessages([getInitialConciergeMessage(policy.title, policy.ministry)]);
       setSessionId(null);
       setErrorMsg(null);
     }
@@ -111,13 +111,7 @@ export default function PolicyArticlePage() {
 
   const handleResetChat = () => {
     if (policy) {
-      setMessages([
-        {
-          role: "assistant",
-          content: policy.initialBriefing,
-          timestamp: Date.now(),
-        },
-      ]);
+      setMessages([getInitialConciergeMessage(policy.title, policy.ministry)]);
       setErrorMsg(null);
     }
   };
@@ -150,6 +144,11 @@ export default function PolicyArticlePage() {
   const relatedPolicies = POLICIES.filter(
     (p) => p.id !== policy.id && (policy.relatedPolicyIds?.includes(p.id) || p.category === policy.category),
   ).slice(0, 3);
+
+  // Clean trailing chat-prompt CTA from the executive briefing so it renders as a clean official dispatch
+  const briefingMarkdown = (policy.initialBriefing || "")
+    .replace(/---\s*💡\s*\*Ask me any question below[^\n]*\*/gi, "")
+    .trim();
 
   return (
     <div className="pb-16 max-w-7xl mx-auto">
@@ -215,14 +214,82 @@ export default function PolicyArticlePage() {
         </div>
       </div>
 
-      {/* Main Content Layout: Central AI Article Body + Editorial Sidebar */}
+      {/* Main Content Layout: Executive Policy Digest + Interactive Concierge + Editorial Sidebar */}
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
-        {/* ============================================================== */}
-        {/* REPLACED ARTICLE BODY: INTERACTIVE QUERY AGENT CHATBOT BUBBLE   */}
-        {/* ============================================================== */}
-        <div className="flex flex-col bg-white border border-stone-200/90 rounded-2xl shadow-xs overflow-hidden">
-          {/* Chat Bubble Top Bar */}
-          <div className="bg-stone-900 text-white px-5 py-3.5 flex items-center justify-between gap-3 border-b border-stone-800">
+        {/* Left Column: 1. Executive Briefing Card (outside chatbot), 2. Query Agent Chatbot */}
+        <div className="space-y-6">
+          {/* ============================================================== */}
+          {/* 1. EXECUTIVE POLICY BRIEFING (ORGANIZED OUTSIDE CHATBOT)       */}
+          {/* ============================================================== */}
+          <article className="bg-white border border-stone-200/90 rounded-2xl shadow-xs overflow-hidden">
+            {/* Top Bar Header */}
+            <div className="bg-stone-900 text-white px-5 py-3.5 flex items-center justify-between gap-3 border-b border-stone-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white shadow-xs">
+                  <FileText className="w-4 h-4 text-emerald-100" />
+                </div>
+                <div>
+                  <div className="font-bold text-xs sm:text-sm text-white flex items-center gap-1.5">
+                    <span>Executive Policy Briefing &amp; Digest</span>
+                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] uppercase px-1.5 py-0.2 rounded font-mono">
+                      Official Gazette
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-stone-400">
+                    Structured regulatory summary &bull; Grounded in government circulars
+                  </div>
+                </div>
+              </div>
+
+              <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-stone-300 bg-stone-800/80 px-2.5 py-1 rounded-md border border-stone-700">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Verified Directives</span>
+              </div>
+            </div>
+
+            {/* Briefing Card Content */}
+            <div className="p-5 sm:p-7">
+              {policy.leadParagraph && (
+                <div className="mb-6 pb-5 border-b border-stone-200/70 bg-stone-50/60 -mx-5 -mt-5 sm:-mx-7 sm:-mt-7 p-5 sm:p-7 border-t-0">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1.5 flex items-center gap-1.5">
+                    <Landmark className="w-3.5 h-3.5 text-stone-400" />
+                    <span>Official Gazette Abstract</span>
+                  </div>
+                  <p className="text-sm sm:text-base text-stone-800 font-serif leading-relaxed italic">
+                    &ldquo;{policy.leadParagraph}&rdquo;
+                  </p>
+                </div>
+              )}
+
+              {/* Formatted Markdown Briefing */}
+              <div className="prose-chat text-xs sm:text-sm leading-relaxed text-stone-800 space-y-3">
+                <ReactMarkdown>{briefingMarkdown}</ReactMarkdown>
+              </div>
+
+              {/* Briefing Card Footer */}
+              <div className="mt-6 pt-4 border-t border-stone-100 flex flex-wrap items-center justify-between gap-3 text-[11px] text-stone-500">
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1 text-emerald-700 font-medium">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    Official Singapore Government Gazette Grounding
+                  </span>
+                  <span className="text-stone-300 hidden sm:inline">&bull;</span>
+                  <span className="hidden sm:inline text-stone-500">{policy.ministry}</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-indigo-700 font-medium bg-indigo-50 px-2.5 py-1 rounded-md">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Interactive Q&amp;A Agent Below</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          {/* ============================================================== */}
+          {/* 2. INTERACTIVE POLICY QUERY AGENT (CHATBOT)                    */}
+          {/* ============================================================== */}
+          <div className="flex flex-col bg-white border border-stone-200/90 rounded-2xl shadow-xs overflow-hidden">
+            {/* Chat Bubble Top Bar */}
+            <div className="bg-stone-900 text-white px-5 py-3.5 flex items-center justify-between gap-3 border-b border-stone-800">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-xs">
                 <Sparkles className="w-4 h-4 text-amber-300" />
@@ -251,7 +318,7 @@ export default function PolicyArticlePage() {
           </div>
 
           {/* Chat Stream Area */}
-          <div className="p-4 sm:p-6 space-y-6 flex-1 min-h-[420px] max-h-[750px] overflow-y-auto bg-stone-50/50">
+          <div className="p-4 sm:p-6 space-y-6 flex-1 min-h-[300px] max-h-[580px] overflow-y-auto bg-stone-50/50">
             {messages.map((msg, idx) => {
               const isAssistant = msg.role === "assistant";
               return (
@@ -388,6 +455,7 @@ export default function PolicyArticlePage() {
             </div>
           </div>
         </div>
+      </div>
 
         {/* ============================================================== */}
         {/* EDITORIAL NEWS SIDEBAR                                          */}

@@ -102,7 +102,7 @@ export default function NewsHeader({
             </div>
             <Link to="/" className="inline-block group">
               <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl font-black tracking-tight text-stone-900 group-hover:text-indigo-900 transition font-black">
-                THE SINGAPORE POLICY CHRONICLE
+                THE SINGAPORE CHRONICLES
               </h1>
             </Link>
             <p className="text-xs text-stone-500 mt-1 font-sans">
