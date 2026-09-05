@@ -40,6 +40,7 @@ const SUGGESTED_TOPICS = [
 
 export default function QueryPage() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
@@ -61,6 +62,7 @@ export default function QueryPage() {
   const handleClearHistory = () => {
     clearQueryMessages();
     setMessages([]);
+    setSessionId(null);
     setErrorBanner(null);
   };
 
@@ -76,11 +78,15 @@ export default function QueryPage() {
     setErrorBanner(null);
 
     try {
-      const answer = await askQuery(question);
+      const res = await askQuery(question, sessionId || undefined);
+
+      if (res.session_id) {
+        setSessionId(res.session_id);
+      }
 
       const assistantMsg: ChatMessageType = {
         role: "assistant",
-        content: answer,
+        content: res.answer,
         timestamp: Date.now(),
       };
 

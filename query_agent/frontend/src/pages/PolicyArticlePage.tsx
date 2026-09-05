@@ -28,6 +28,7 @@ export default function PolicyArticlePage() {
 
   // Chat conversation state for this policy
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [inputVal, setInputVal] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -46,6 +47,7 @@ export default function PolicyArticlePage() {
           timestamp: Date.now(),
         },
       ]);
+      setSessionId(null);
       setErrorMsg(null);
     }
   }, [policy?.id]);
@@ -73,11 +75,15 @@ export default function PolicyArticlePage() {
     try {
       // Prime the question with policy context if appropriate
       const contextualQuestion = `Regarding the Singapore policy "${policy.title}" (${policy.ministry}): ${queryText}`;
-      const answer = await askQuery(contextualQuestion);
+      const res = await askQuery(contextualQuestion, sessionId || undefined);
+
+      if (res.session_id) {
+        setSessionId(res.session_id);
+      }
 
       const assistantMsg: ChatMessage = {
         role: "assistant",
-        content: answer,
+        content: res.answer,
         timestamp: Date.now(),
       };
 

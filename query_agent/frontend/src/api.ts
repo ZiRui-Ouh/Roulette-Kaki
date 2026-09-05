@@ -48,15 +48,23 @@ async function request<T>(
   return resp.json();
 }
 
+export interface QueryResponse {
+  answer: string;
+  session_id: string;
+}
+
 /**
- * Query Agent API - send policy question to the backend
+ * Query Agent API - send policy question to the backend with optional session memory
  */
-export async function askQuery(question: string): Promise<string> {
-  const data = await request<{ answer: string }>(QUERY_API_BASE, "/query", {
+export async function askQuery(
+  question: string,
+  sessionId?: string,
+): Promise<QueryResponse> {
+  const data = await request<QueryResponse>(QUERY_API_BASE, "/query", {
     method: "POST",
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, session_id: sessionId }),
   });
-  return data.answer;
+  return data;
 }
 
 /**

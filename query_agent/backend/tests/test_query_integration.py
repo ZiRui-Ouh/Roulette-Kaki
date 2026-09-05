@@ -95,6 +95,46 @@ class QueryIntegrationTests(unittest.TestCase):
         data = response.json()
         self.assertIn("answer", data)
         self.assertIn("SkillsFuture", data["answer"])
+        self.assertIn("session_id", data)
+
+    @patch("agents.query.fetch_from_search_agent")
+    @patch("agents.query.ask_nova")
+    def test_query_session_memory_multi_turn(self, mock_ask, mock_search):
+        mock_search.return_value = {
+            "official_sources": [],
+            "unofficial_sources": [],
+            "search_summary": "Policy summary.",
+        }
+        mock_ask.side_effect = [
+            "Families income ceiling is $16,000.",
+            "For singles, the ceiling is $8,000.",
+        ]
+
+        # First turn - no session_id provided
+        resp1 = self.client.post("/query", json={"question": "What is the BTO ceiling for families?"})
+        self.assertEqual(resp1.status_code, 200)
+        data1 = resp1.json()
+        self.assertIn("session_id", data1)
+        session_id = data1["session_id"]
+        self.assertIn("$16,000", data1["answer"])
+
+        # Second turn - provide the session_id
+        resp2 = self.client.post("/query", json={
+            "question": "What about for singles?",
+            "session_id": session_id,
+        })
+        self.assertEqual(resp2.status_code, 200)
+        data2 = resp2.json()
+        self.assertEqual(data2["session_id"], session_id)
+        self.assertIn("$8,000", data2["answer"])
+
+        # Check session retrieval endpoint
+        session_resp = self.client.get(f"/query/sessions/{session_id}")
+        self.assertEqual(session_resp.status_code, 200)
+        session_data = session_resp.json()
+        self.assertEqual(session_data["session_id"], session_id)
+        self.assertEqual(len(session_data["chat_history"]), 4)  # 2 user turns + 2 assistant turns
+        self.assertIn("ttl", session_data)
 
     def test_api_home_health_endpoint(self):
         response = self.client.get("/")

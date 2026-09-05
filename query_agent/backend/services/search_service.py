@@ -60,6 +60,7 @@ def fetch_from_search_agent(
     question: str,
     urls: list[str] | None = None,
     provided_sources: list[dict] | None = None,
+    conversation_context: list[dict] | None = None,
 ) -> dict[str, Any]:
     """
     Invoke the Search Agent to gather official and unofficial data.
@@ -68,6 +69,12 @@ def fetch_from_search_agent(
         dict with keys:
             - official_sources: list[dict]
             - unofficial_sources: list[dict]
+            - current_applicable_source: dict | None
+            - conflicting_sources: list[dict]
+            - official_policy_facts: list[dict]
+            - community_insights: list[dict]
+            - query_intent: str
+            - rewritten_query: str
             - search_summary: str
     """
     # Check if an external HTTP search agent service is configured
@@ -78,7 +85,11 @@ def fetch_from_search_agent(
 
             resp = requests.post(
                 f"{search_agent_url.rstrip('/')}/search",
-                json={"q": question, "urls": urls or []},
+                json={
+                    "q": question,
+                    "urls": urls or [],
+                    "conversation_context": conversation_context or [],
+                },
                 timeout=25,
             )
             resp.raise_for_status()
@@ -100,6 +111,7 @@ def fetch_from_search_agent(
             question=question,
             urls=urls,
             provided_sources=provided_sources,
+            conversation_context=conversation_context,
         )
     except Exception as exc:
         log.error("Failed to invoke Search Agent: %s", exc)

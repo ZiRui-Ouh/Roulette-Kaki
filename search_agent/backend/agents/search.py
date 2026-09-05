@@ -1,190 +1,96 @@
 from __future__ import annotations
 
+import logging
 import re
+from typing import Any
 from services.bedrock import ask_nova
 from services.webscraper import (
     build_search_intelligence,
+    classify_intent,
     match_policy_urls,
+    rewrite_query,
     scrape_sources,
     scrape_unofficial_sources,
+    understand_user_intent,
 )
+
+log = logging.getLogger(__name__)
 
 
 SEARCH_SYNTHESIS_PROMPT = """
 You are the Search Agent for a Singapore policy intelligence platform.
 
-Your job is to retrieve and synthesize the MOST CURRENT information about Singapore government policies.
-
-You receive web search results from official government websites and public discussion platforms.
-
-IMPORTANT:
-Your output will be passed directly to a Policy Query Agent.
-The Query Agent must be able to clearly determine the CURRENT policy and must NOT accidentally use outdated figures.
+Your job is to synthesize web research from official Singapore government sources and public community discussions into structured, reliable policy intelligence for the Policy Query Agent.
 
 ==================================================
-1. SOURCE PRIORITY
+1. SOURCE HIERARCHY & GROUND TRUTH
 ==================================================
 
-Use this priority order:
-
-1. Most recent official Singapore Government source
-2. Older official Singapore Government source
-3. Reputable secondary source
-4. Public discussion / Reddit / HardwareZone
-
-Official sources include:
-- HDB
-- CPF Board
-- MOM
-- IRAS
-- MOF
-- MSF
-- MOH
-- MND
-- Gov.sg
-- Singapore Statutes Online
-
-Never allow an unofficial source to override an official government source.
+- Official Singapore government websites (.gov.sg, statutory boards, official ministries) are AUTHORITATIVE.
+- Unofficial sources (Reddit, HardwareZone, public forums) provide COMMUNITY CONTEXT and SENTIMENT only.
+- Unofficial sources must NEVER override or dictate official government policy, eligibility criteria, income ceilings, payout amounts, interest rates, or deadlines.
+- Use raw source text as primary evidence. NEVER invent facts, dates, or numbers.
 
 ==================================================
-2. RECENCY IS CRITICAL
+2. CATEGORY PRESERVATION (CRITICAL)
 ==================================================
 
-For EVERY policy figure, rule, eligibility requirement or deadline:
-
-- Check the publication/update date.
-- Identify whether the information is CURRENT or HISTORICAL.
-- Prefer the newest official announcement or guideline.
-- If a newer official source changes an older figure, use ONLY the newer figure as the CURRENT figure.
-
-If an older policy figure has been officially updated:
-- State the CURRENT figure clearly.
-- Note the effective date.
-- Do NOT present historical figures as current.
+- Never mix policy categories or demographic groups.
+- Maintain absolute separation:
+  * SINGLES rules (e.g. 2-room Flexi BTO flat, singles grant) apply ONLY to singles.
+  * FAMILIES / COUPLES rules apply ONLY to families/couples.
+  * EXECUTIVE CONDOMINIUM (EC) rules apply ONLY to ECs.
+  * SENIORS rules apply ONLY to seniors.
+- Never transfer figures or income ceilings between categories (e.g. do not apply a family ceiling to a single applicant, or resale rules to new BTO flats).
 
 ==================================================
-3. CONFLICT RESOLUTION & FACTUAL BENCHMARKS
+3. RECENCY & POLICY VERSIONING
 ==================================================
 
-Official Singapore Policy Benchmarks:
-- HDB BTO 4-room and larger (Families/Couples): Income ceiling is $16,000/month (raised from $14,000).
-- HDB BTO 2-room Flexi (Singles 35+): Income ceiling is $8,000/month (raised from $7,000).
-- Executive Condominiums (EC): Income ceiling is $18,000/month (raised from $16,000).
-- 3-room BTO Flats: $8,000 or $16,000 depending on project.
-- CPF: OA 2.5%, SA/MA/RA 4.0%. SA closes at 55. ERS is 4x BRS ($426,000 in 2025).
-
-You must preserve the exact relationship:
-- FAMILIES / COUPLES -> $16,000
-- SINGLES -> $8,000
-- EC -> $18,000
-
-When two official sources contain different figures:
-1. Compare publication/effective dates.
-2. Ensure you are comparing the same exact category (e.g. do not mix EC with BTO, do not mix Singles with Families).
-3. Use the verified current figure.
+- Government policies and payment amounts evolve over time.
+- Identify whether an official source represents the CURRENT active policy or an older, superseded announcement.
+- When an official source announces an updated policy or payment quantum for the current year (e.g. 2026 Cost-of-Living Special Payment vs earlier Assurance Package iterations):
+  * State the CURRENT applicable policy and figures clearly.
+  * State the effective or disbursement date.
+  * Note older figures under OLDER/CONFLICTING SOURCES as superseded context.
+- Never average, combine, or randomly pick between conflicting figures from different policy periods.
 
 ==================================================
-4. DIRECT OFFICIAL SOURCES
+4. INSUFFICIENT EVIDENCE
 ==================================================
 
-When the user asks about a specific policy, prioritize the official page that directly governs that policy.
-
-For example, for BTO / HDB eligibility, prioritize:
-
-HDB Couples and Families:
-https://www.hdb.gov.sg/buying-a-flat/flat-grant-and-loan-eligibility/couples-and-families
-
-HDB Singles:
-https://www.hdb.gov.sg/buying-a-flat/flat-grant-and-loan-eligibility/singles
-
-HDB Seniors:
-https://www.hdb.gov.sg/buying-a-flat/flat-grant-and-loan-eligibility/seniors
-
-Also prioritize newer HDB press releases or announcements if they modify the figures on these pages.
+- If the retrieved sources do not contain authoritative evidence answering the question, explicitly state under EVIDENCE LIMITATIONS:
+  "The available official sources do not provide enough information."
+- Do not guess or extrapolate.
 
 ==================================================
-5. SEARCH FOR POLICY UPDATES
+5. REQUIRED STRUCTURED FORMAT
 ==================================================
 
-Do NOT rely only on the dedicated policy page.
+Provide your synthesis strictly in the following structured sections:
 
-For questions containing words such as:
+CURRENT OFFICIAL POLICY:
+[Clear summary of the active, applicable official policy]
 
-- current
-- latest
-- today
-- now
-- updated
-- new
-- revised
-- recently
+IMPORTANT FIGURES:
+- [Figure/Ceiling/Amount and exact category/demographic it applies to]
 
-also search for recent official announcements that may have changed the policy.
+IMPORTANT DATES:
+- [Announcement date, effective date, disbursement/payment date, or application period]
 
-For example:
+CURRENT APPLICABLE SOURCE:
+- Title: [Official source title]
+- URL: [Official source URL]
+- Reason: [Why this source governs the current inquiry]
 
-"current BTO income ceiling"
-
-should search for:
-
-- current HDB income ceiling
-- latest HDB income ceiling
-- HDB income ceiling 2026
-- site:hdb.gov.sg income ceiling HDB
-- recent HDB income ceiling announcement
-
-==================================================
-6. OUTPUT FORMAT
-==================================================
-
-Return information in this structure:
-
-CURRENT POLICY:
-[The current rule / figure]
-
-EFFECTIVE DATE:
-[When it became effective]
-
-POLICY CATEGORY:
-[Families / Singles / Seniors / CPF / etc.]
-
-OFFICIAL SOURCE:
-[Title]
-[URL]
-
-IMPORTANT HISTORICAL INFORMATION:
-[Only include older figures if necessary to explain the change.]
+OLDER/CONFLICTING SOURCES:
+[List any superseded announcements or conflicting historical figures, or 'None' if unambiguous]
 
 COMMUNITY INSIGHTS:
-[Only include public discussion if relevant.]
+[Brief public sentiment, user experiences, or common questions from unofficial sources, or 'None']
 
-==================================================
-7. NEVER INVENT INFORMATION
-==================================================
-
-Never guess a number.
-
-Never assume an old figure is still current.
-
-Never combine figures from different policy periods.
-
-If the current figure cannot be determined from the retrieved sources, say:
-
-"Current figure could not be confirmed from the retrieved official sources."
-
-==================================================
-8. FINAL RULE
-==================================================
-
-The MOST RECENT APPLICABLE OFFICIAL POLICY ALWAYS OVERRIDES OLDER POLICY INFORMATION.
-
-Your primary objective is:
-
-CURRENT + OFFICIAL + VERIFIED + DATE-AWARE
-
-not simply:
-
-MOST SEARCHED RESULT.
+EVIDENCE LIMITATIONS:
+[Any missing data or limitations in retrieved sources, or 'None']
 """
 
 
@@ -192,23 +98,48 @@ def build_search_synthesis_prompt(
     question: str,
     official_sources: list[dict],
     unofficial_sources: list[dict],
+    current_applicable_source: dict | None = None,
+    conflicts: list[dict] | None = None,
+    intent_type: str = "GENERAL_INFORMATION",
+    official_facts: list[dict] | None = None,
 ) -> str:
-    """Build prompt to synthesize scraped search findings with recency awareness."""
+    """Build prompt to synthesize scraped search findings with applicability and recency awareness."""
     official_text = ""
     for idx, src in enumerate(official_sources, 1):
         content = src.get("content") or src.get("text") or ""
         snippet = src.get("search_snippet", "")
-        combined_content = f"{snippet}\n\n{content}".strip() if snippet else content
+        excerpt = src.get("relevant_excerpt", "")
+        combined_content = f"RELEVANT EXCERPT:\n{excerpt}\n\nFULL CONTENT:\n{content}".strip() if excerpt else content
+
+        published = src.get("published_date") or src.get("publication_date") or "Not specified"
+        effective = src.get("effective_date") or "Active"
+        payment = src.get("payment_date") or "Not specified"
+        app_reason = src.get("applicability_reason", "Applicable official government portal")
+
         official_text += f"""
 [OFFICIAL SOURCE {idx}]
 Title: {src.get('title', 'Official Government Source')}
 URL: {src.get('url', '')}
 Type: {src.get('source_type', 'Official Portal')}
-Last Updated: {src.get('last_updated', src.get('publication_date', 'Not specified'))}
+Domain: {src.get('domain', '')}
+Published Date: {published}
+Effective Date: {effective}
+Payment/Disbursement Date: {payment}
+Applicability Reason: {app_reason}
 Content:
-{combined_content}
+{combined_content[:15000]}
 -------------------------
 """
+
+    structured_facts_text = ""
+    if official_facts:
+        structured_facts_text = "\nEXTRACTED STRUCTURED POLICY FACTS (AUTHORITATIVE FIGURES & RULES):\n"
+        for f in official_facts:
+            structured_facts_text += (
+                f"- Fact: {f.get('fact')} | Category: {f.get('category')} | Value: {f.get('value')} | "
+                f"Effective: {f.get('effective_date')} | Source: {f.get('source_title')} ({f.get('source_url')})\n"
+                f"  Direct Excerpt: {f.get('relevant_excerpt')}\n"
+            )
 
     unofficial_text = ""
     for idx, src in enumerate(unofficial_sources, 1):
@@ -219,23 +150,52 @@ Content:
 [UNOFFICIAL SOURCE {idx}]
 Title: {src.get('title', 'Community Discussion')}
 URL: {src.get('url', '')}
-Type: {src.get('source_type', 'Unofficial Forum')}
-Last Updated: {src.get('last_updated', src.get('publication_date', 'Not specified'))}
+Type: {src.get('source_type', 'Community Forum')}
+Domain: {src.get('domain', '')}
 Content:
-{combined_content}
+{combined_content[:8000]}
 -------------------------
+"""
+
+    conflict_text = ""
+    if conflicts:
+        conflict_text = "\nIDENTIFIED POLICY CONFLICTS / SUPERSEDED SOURCES:\n"
+        for c in conflicts:
+            conflict_text += f"- {c.get('title')} ({c.get('url')}): {c.get('reason')}\n"
+
+    target_source_text = ""
+    if current_applicable_source:
+        target_source_text = f"\nPRIMARY APPLICABLE SOURCE CANDIDATE:\nTitle: {current_applicable_source.get('title')}\nURL: {current_applicable_source.get('url')}\nReason: {current_applicable_source.get('applicability_reason')}\n"
+
+    opinion_guidelines = ""
+    if intent_type in ("PUBLIC_OPINION", "USER_EXPERIENCE", "PROS_CONS"):
+        opinion_guidelines = """
+==================================================
+CRITICAL DIRECTIVE FOR PUBLIC OPINION / EXPERIENCES:
+==================================================
+- The user is inquiring about public sentiment, community experiences, or pros/cons.
+- Synthesize real themes from the UNOFFICIAL COMMUNITY SOURCES (e.g. waiting times, ballot uncertainty, affordability, location trade-offs, flat size).
+- DO NOT answer with an unrelated income ceiling or administrative eligibility rule (e.g. gross monthly household income ceiling of $8,000 for singles).
+- Use clear community phrasing: "Common themes discussed on forums include...", "Several commenters reported...".
+- Official sources provide only brief factual context if relevant.
+==================================================
 """
 
     return f"""
 {SEARCH_SYNTHESIS_PROMPT}
 
+{opinion_guidelines}
+{structured_facts_text}
+{target_source_text}
+{conflict_text}
+
 OFFICIAL GOVERNMENT SOURCES:
-{official_text if official_text else "No specific official web pages provided."}
+{official_text if official_text else "No official sources provided."}
 
-UNOFFICIAL PUBLIC DISCUSSION SOURCES:
-{unofficial_text if unofficial_text else "No unofficial forum discussions provided."}
+UNOFFICIAL COMMUNITY SOURCES:
+{unofficial_text if unofficial_text else "No community forum discussions provided."}
 
-USER QUERY:
+USER QUESTION:
 {question}
 """
 
@@ -244,55 +204,112 @@ def gather_and_search(
     question: str,
     urls: list[str] | None = None,
     provided_sources: list[dict] | None = None,
-) -> dict:
+    conversation_context: list[dict] | None = None,
+) -> dict[str, Any]:
     """
-    Search, scrape, and structure data from official Singapore government sources
+    Search, scrape, and structure intelligence from official Singapore government sources
     and community discussion platforms.
     """
     if not question or not question.strip():
         raise ValueError("Question cannot be empty.")
 
-    all_sources: list[dict] = []
+    all_official: list[dict] = []
+    all_unofficial: list[dict] = []
+    current_applicable: dict | None = None
+    conflicts: list[dict] = []
+    official_facts: list[dict] = []
+    community_insights: list[dict] = []
+    query_intent: str = "GENERAL_INFORMATION"
+    rewritten_query: str = question
+    debug_trace = None
 
     if provided_sources:
-        all_sources.extend(provided_sources)
+        for s in provided_sources:
+            if s.get("is_official", True):
+                all_official.append(s)
+            else:
+                all_unofficial.append(s)
 
     if urls:
         scraped = scrape_sources(urls)
-        all_sources.extend(scraped)
+        for s in scraped:
+            if s.get("is_official", True):
+                if s not in all_official:
+                    all_official.append(s)
+            else:
+                if s not in all_unofficial:
+                    all_unofficial.append(s)
     elif not provided_sources:
-        intel = build_search_intelligence(question, include_unofficial=True)
-        if intel.get("official_sources"):
-            all_sources.extend(intel["official_sources"])
-        if intel.get("unofficial_sources"):
-            all_sources.extend(intel["unofficial_sources"])
+        intel = build_search_intelligence(
+            question,
+            conversation_context=conversation_context,
+            include_unofficial=True,
+        )
+        all_official.extend(intel.get("official_sources", []))
+        all_unofficial.extend(intel.get("unofficial_sources", []))
+        current_applicable = intel.get("current_applicable_source")
+        conflicts = intel.get("conflicting_sources", [])
+        official_facts = intel.get("official_policy_facts", [])
+        community_insights = intel.get("community_insights", [])
+        query_intent = intel.get("query_intent", "GENERAL_INFORMATION")
+        rewritten_query = intel.get("rewritten_query", question)
+        debug_trace = intel.get("debug_trace")
 
-    official_sources = [s for s in all_sources if s.get("is_official", True)]
-    unofficial_sources = [s for s in all_sources if not s.get("is_official", True)]
+    if not current_applicable and all_official:
+        current_applicable = all_official[0]
 
     # If no sources gathered at all
-    if not official_sources and not unofficial_sources:
-        return {
+    if not all_official and not all_unofficial:
+        fallback_res = {
+            "query_intent": query_intent,
+            "rewritten_query": rewritten_query,
             "official_sources": [],
             "unofficial_sources": [],
-            "search_summary": "No live sources found or specified for this query.",
+            "current_applicable_source": None,
+            "conflicting_sources": [],
+            "official_policy_facts": [],
+            "community_insights": [],
+            "search_summary": "The available official sources do not provide enough information.",
+            "debug_trace": debug_trace,
         }
+        if debug_trace:
+            debug_trace.emit()
+        return fallback_res
 
     prompt = build_search_synthesis_prompt(
-        question=question,
-        official_sources=official_sources,
-        unofficial_sources=unofficial_sources,
+        question=rewritten_query or question,
+        official_sources=all_official,
+        unofficial_sources=all_unofficial,
+        current_applicable_source=current_applicable,
+        conflicts=conflicts,
+        intent_type=query_intent,
+        official_facts=official_facts,
     )
 
     try:
-        search_summary = ask_nova(prompt, max_tokens=1500)
+        search_summary = ask_nova(prompt, max_tokens=600)
     except Exception as exc:
-        search_summary = f"Search summary generated from sources: {len(official_sources)} official and {len(unofficial_sources)} unofficial sources scraped. (Bedrock notice: {exc})"
+        log.warning("Bedrock synthesis call failed: %s", exc)
+        search_summary = (
+            f"Search intelligence gathered from {len(all_official)} official and "
+            f"{len(all_unofficial)} community sources. (Bedrock notice: {exc})"
+        )
+
+    if debug_trace:
+        debug_trace.search_agent_synthesis = search_summary
+        debug_trace.emit()
 
     return {
-        "official_sources": official_sources,
-        "unofficial_sources": unofficial_sources,
+        "query_intent": query_intent,
+        "rewritten_query": rewritten_query,
+        "official_sources": all_official,
+        "unofficial_sources": all_unofficial,
+        "current_applicable_source": current_applicable,
+        "conflicting_sources": conflicts,
+        "official_policy_facts": official_facts,
+        "community_insights": community_insights,
         "search_summary": search_summary,
+        "debug_trace": debug_trace,
     }
 
 
@@ -310,7 +327,7 @@ def answer_question(
     if unofficial_sources is None:
         if not urls:
             raise ValueError("At least one unofficial source URL is required.")
-        unofficial_sources = scrape_unofficial_sources(urls)
+        unofficial_sources = scrape_unofficial_sources(question)
 
     prompt = build_search_synthesis_prompt(
         question=question,

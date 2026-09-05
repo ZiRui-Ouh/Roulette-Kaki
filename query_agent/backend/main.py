@@ -18,6 +18,14 @@ import os
 import uuid
 from typing import Optional
 
+<<<<<<< Updated upstream
+=======
+# Ensure default environment configurations before service initialization
+os.environ.setdefault("USE_LOCAL_STUBS", "1")
+os.environ.setdefault("SCRAPER_MODE", "fixture")
+os.environ.setdefault("YOUTUBE_PLAYLIST", "PLetiU3qG4uSrSjL6UlfVsgR89lxBzP5D1")
+
+>>>>>>> Stashed changes
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -28,11 +36,14 @@ from agents.query import answer_question
 from services import sittings as sittings_service
 from services import storage as storage_service
 
+<<<<<<< Updated upstream
 # Default environment for local demo. Clear these for real-AWS / real-scraper mode.
 os.environ.setdefault("USE_LOCAL_STUBS", "1")
 os.environ.setdefault("SCRAPER_MODE", "fixture")
 os.environ.setdefault("YOUTUBE_PLAYLIST", "PLetiU3qG4uSrSjL6UlfVsgR89lxBzP5D1")
 
+=======
+>>>>>>> Stashed changes
 log = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -70,6 +81,12 @@ app.add_middleware(
 class QueryRequest(BaseModel):
     question: str
     urls: list[str] | None = None
+    session_id: Optional[str] = None
+
+
+class QueryResponse(BaseModel):
+    answer: str
+    session_id: str
 
 
 class DebateSummary(BaseModel):
@@ -100,7 +117,11 @@ def root() -> dict:
         "status": "online",
         "endpoints": [
             "POST /query",
+<<<<<<< Updated upstream
             "GET  /health",
+=======
+            "GET  /query/sessions/{session_id}",
+>>>>>>> Stashed changes
             "GET  /sittings",
             "GET  /debates",
             "GET  /debates/{date}",
@@ -117,6 +138,7 @@ def health() -> dict:
 
 # --- Policy Query Agent ------------------------------------------------------
 
+<<<<<<< Updated upstream
 @app.post("/query")
 def query(q: QueryRequest) -> dict:
     if not q.question or not q.question.strip():
@@ -126,6 +148,25 @@ def query(q: QueryRequest) -> dict:
         )
     answer = answer_question(question=q.question, urls=q.urls)
     return {"answer": answer}
+=======
+@app.post("/query", response_model=QueryResponse)
+def query(q: QueryRequest):
+    answer, session_id = answer_question(
+        question=q.question,
+        urls=q.urls,
+        session_id=q.session_id,
+        return_session=True,
+    )
+    return {"answer": answer, "session_id": session_id}
+
+
+@app.get("/query/sessions/{session_id}")
+def get_query_session(session_id: str):
+    session = storage_service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+    return session
+>>>>>>> Stashed changes
 
 
 # --- Parliamentary Debate Endpoints ------------------------------------------

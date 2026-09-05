@@ -102,11 +102,23 @@ def list_digests(limit: int = 50) -> list[dict]:
 
 # --- Session state -----------------------------------------------------------
 
+def is_stub_mode() -> bool:
+    return os.environ.get("USE_LOCAL_STUBS") == "1"
+
+
 def get_session(session_id: str) -> dict | None:
-    if STUB_MODE:
+    if is_stub_mode() or STUB_MODE:
         return _stub_sessions.get(session_id)
-    resp = _ddb().Table(SESSIONS_TABLE).get_item(Key={"session_id": session_id})
-    return resp.get("Item")
+    try:
+        resp = _ddb().Table(SESSIONS_TABLE).get_item(Key={"session_id": session_id})
+        item = resp.get("Item")
+        if item:
+            _stub_sessions[session_id] = item
+            return item
+        return _stub_sessions.get(session_id)
+    except Exception as e:
+        log.warning("DynamoDB get_session failed (%s) — falling back to local session store", e)
+        return _stub_sessions.get(session_id)
 
 
 def put_session(session: dict) -> None:
@@ -114,12 +126,17 @@ def put_session(session: dict) -> None:
     this — TTL is set here so it cannot be forgotten upstream.
     """
     session = {**session, "ttl": int(time.time()) + SESSION_TTL_SECONDS}
-    if STUB_MODE:
-        session_id = session.get("session_id")
-        if session_id:
-            _stub_sessions[session_id] = session
+    session_id = session.get("session_id")
+    if session_id:
+        _stub_sessions[session_id] = session
+
+    if is_stub_mode() or STUB_MODE:
         return
-    _ddb().Table(SESSIONS_TABLE).put_item(Item=session)
+
+    try:
+        _ddb().Table(SESSIONS_TABLE).put_item(Item=session)
+    except Exception as e:
+        log.warning("DynamoDB put_session failed (%s) — preserved in local session store", e)
 
 
 # --- Raw report cache --------------------------------------------------------

@@ -4,45 +4,36 @@ Mirror of webscraper service in query_agent backend for direct access and reliab
 
 from __future__ import annotations
 
-import sys
+import importlib.util
 from pathlib import Path
 
-# Ensure search_agent is in sys.path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SEARCH_AGENT_BACKEND = REPO_ROOT / "search_agent" / "backend"
-if str(SEARCH_AGENT_BACKEND) not in sys.path:
-    sys.path.insert(0, str(SEARCH_AGENT_BACKEND))
+scraper_file = SEARCH_AGENT_BACKEND / "services" / "webscraper.py"
 
-try:
-    from services.webscraper import (  # type: ignore
-        build_search_intelligence,
-        detect_policy_categories,
-        extract_dates,
-        extract_effective_dates,
-        get_priority_policy_urls,
-        match_policy_urls,
-        scrape_official_sources,
-        scrape_page,
-        scrape_sources,
-        scrape_unofficial_sources,
-        search_web,
-    )
-except ImportError:
-    import importlib.util
+spec = importlib.util.spec_from_file_location("search_agent_webscraper", str(scraper_file))
+if spec and spec.loader:
+    _mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(_mod)
 
-    scraper_file = SEARCH_AGENT_BACKEND / "services" / "webscraper.py"
-    spec = importlib.util.spec_from_file_location("search_agent_webscraper", str(scraper_file))
-    if spec and spec.loader:
-        _mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(_mod)
-        build_search_intelligence = _mod.build_search_intelligence
-        detect_policy_categories = _mod.detect_policy_categories
-        extract_dates = _mod.extract_dates
-        extract_effective_dates = _mod.extract_effective_dates
-        get_priority_policy_urls = _mod.get_priority_policy_urls
-        match_policy_urls = _mod.match_policy_urls
-        scrape_official_sources = _mod.scrape_official_sources
-        scrape_page = _mod.scrape_page
-        scrape_sources = _mod.scrape_sources
-        scrape_unofficial_sources = _mod.scrape_unofficial_sources
-        search_web = _mod.search_web
+    build_search_intelligence = _mod.build_search_intelligence
+    classify_intent = _mod.classify_intent
+    detect_policy_categories = _mod.detect_policy_categories
+    extract_dates = _mod.extract_dates
+    extract_effective_dates = _mod.extract_effective_dates
+    extract_granular_dates = _mod.extract_granular_dates
+    get_priority_policy_urls = _mod.get_priority_policy_urls
+    match_policy_urls = _mod.match_policy_urls
+    rank_sources = _mod.rank_sources
+    rewrite_query = _mod.rewrite_query
+    score_applicability = _mod.score_applicability
+    scrape_official_sources = _mod.scrape_official_sources
+    scrape_page = _mod.scrape_page
+    scrape_sources = _mod.scrape_sources
+    scrape_unofficial_sources = _mod.scrape_unofficial_sources
+    search_web = _mod.search_web
+    understand_user_intent = _mod.understand_user_intent
+    is_followup_query = _mod.is_followup_query
+    extract_structured_policy_facts = _mod.extract_structured_policy_facts
+    SearchAgentDebugTrace = _mod.SearchAgentDebugTrace
+    COMMUNITY_SEED_PORTALS = _mod.COMMUNITY_SEED_PORTALS
