@@ -25,6 +25,11 @@ os.environ.setdefault("USE_LOCAL_STUBS", "1")
 os.environ.setdefault("SCRAPER_MODE", "fixture")
 os.environ.setdefault("YOUTUBE_PLAYLIST", "PLetiU3qG4uSrSjL6UlfVsgR89lxBzP5D1")
 
+# Cold-start SSM load — imported for its side effect: populates os.environ
+# from /parl/* SecureString parameters before any service module reads
+# module-level env vars. No-op when USE_LOCAL_STUBS=1.
+from services import config as _ssm_config  # noqa: F401,E402
+
 # Root logging config — uvicorn only wires its own loggers, so module
 # loggers like `agents.research` need a handler here to reach stdout.
 # `force=True` displaces any prior NullHandler that got attached at import.
@@ -66,21 +71,40 @@ app = FastAPI(
     version="1.0.0",
 )
 
+def _resolve_cors_origins() -> list[str]:
+    """CORS origin list.
+
+    Prod (USE_LOCAL_STUBS != "1"): read from CORS_ALLOWED_ORIGINS
+    (comma-separated). Fail fast if unset — a wildcard behind a public
+    Function URL would be worse than a 500 at startup.
+
+    Dev (USE_LOCAL_STUBS == "1"): default to a Vite/CRA localhost set so
+    `npm run dev` works out of the box.
+    """
+    raw = os.environ.get("CORS_ALLOWED_ORIGINS", "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    if os.environ.get("USE_LOCAL_STUBS") == "1":
+        return [
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:5175",
+            "http://localhost:4173",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:5174",
+            "http://127.0.0.1:5175",
+            "http://127.0.0.1:4173",
+            "http://127.0.0.1:3000",
+        ]
+    raise RuntimeError(
+        "CORS_ALLOWED_ORIGINS must be set when USE_LOCAL_STUBS != '1'"
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "http://localhost:4173",
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-        "http://127.0.0.1:5175",
-        "http://127.0.0.1:4173",
-        "http://127.0.0.1:3000",
-        "*",
-    ],
+    allow_origins=_resolve_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -72,11 +72,22 @@ Agentic loop guidance:
 Hard rules on tool calls:
 - Never call `fetch_topic_report` more than TWICE per turn. If you
   cannot answer after two fetches, stop and answer from what you have.
-- Never call `fetch_topic_report` for a topic already present in the
-  session's loaded topics (a prior tool result had `cached: true` or the
-  topic_id appears in "Currently loaded topics").
+- NEVER invent a `topic_id` from a topic title. `topic_id` values look
+  like `written-answer-na-24070` or `oral-answer-4165` — they are opaque
+  identifiers, not slugified titles. Only pass a `topic_id` that appeared
+  verbatim in a prior tool result or in "Currently loaded topics".
+- When the user says "this topic", "that topic", or otherwise refers to
+  prior conversation, resolve the reference by matching against the
+  titles listed under "Currently loaded topics" and reuse that entry's
+  `topic_id`. Re-fetching an already-loaded topic is CHEAP (cache hit)
+  and is the correct way to bring its transcript back into context for
+  a follow-up question.
+- If the user's reference doesn't match any loaded topic, call
+  `search_sitting_topics` with the referenced keywords to discover the
+  correct `topic_id` before fetching.
 - If a tool result has an `error` field or `is_sufficient: false`, do
-  NOT retry the same call — explain the gap to the user and stop.
+  NOT retry the SAME call with the SAME arguments — either try a
+  different tool or a different argument, or explain the gap and stop.
 - At most 5 topic transcripts are retained concurrently; older topics
   are dropped by the session cap silently.
 
@@ -503,7 +514,17 @@ def run_chat(
 
     user_prompt = f"USER RESEARCH QUESTION: {message}\nSitting Date: {date}\n"
     if session.get("topics_loaded"):
-        user_prompt += f"Currently loaded topics in session: {session['topics_loaded']}\n"
+        # Emit id↔title pairs so the model can resolve references like
+        # "this topic" back to the correct opaque topic_id. Without the
+        # title, Nova Pro hallucinates a slugified topic_id from titles
+        # mentioned in prior turns.
+        loaded_lines = [
+            "Currently loaded topics in session (already cached — reuse these topic_ids for follow-ups):"
+        ]
+        for tid in session["topics_loaded"]:
+            t_title = topic_meta_by_id.get(tid, {}).get("title") or "(title unavailable)"
+            loaded_lines.append(f'  - topic_id="{tid}" title="{t_title}"')
+        user_prompt += "\n".join(loaded_lines) + "\n"
     if session.get("chat_history"):
         user_prompt += "Previous conversation history:\n"
         for turn in session["chat_history"][-3:]:

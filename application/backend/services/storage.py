@@ -109,16 +109,8 @@ def is_stub_mode() -> bool:
 def get_session(session_id: str) -> dict | None:
     if is_stub_mode() or STUB_MODE:
         return _stub_sessions.get(session_id)
-    try:
-        resp = _ddb().Table(SESSIONS_TABLE).get_item(Key={"session_id": session_id})
-        item = resp.get("Item")
-        if item:
-            _stub_sessions[session_id] = item
-            return item
-        return _stub_sessions.get(session_id)
-    except Exception as e:
-        log.warning("DynamoDB get_session failed (%s) — falling back to local session store", e)
-        return _stub_sessions.get(session_id)
+    resp = _ddb().Table(SESSIONS_TABLE).get_item(Key={"session_id": session_id})
+    return resp.get("Item")
 
 
 def put_session(session: dict) -> None:
@@ -127,16 +119,13 @@ def put_session(session: dict) -> None:
     """
     session = {**session, "ttl": int(time.time()) + SESSION_TTL_SECONDS}
     session_id = session.get("session_id")
-    if session_id:
-        _stub_sessions[session_id] = session
 
     if is_stub_mode() or STUB_MODE:
+        if session_id:
+            _stub_sessions[session_id] = session
         return
 
-    try:
-        _ddb().Table(SESSIONS_TABLE).put_item(Item=session)
-    except Exception as e:
-        log.warning("DynamoDB put_session failed (%s) — preserved in local session store", e)
+    _ddb().Table(SESSIONS_TABLE).put_item(Item=session)
 
 
 # --- Raw report cache --------------------------------------------------------

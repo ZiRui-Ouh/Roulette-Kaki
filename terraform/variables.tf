@@ -1,5 +1,5 @@
 variable "region" {
-  description = "AWS region for all resources. Bedrock Nova is in ap-southeast-1."
+  description = "AWS region for all resources. Bedrock Nova is in us-east-1."
   type        = string
   default     = "us-east-1"
 }

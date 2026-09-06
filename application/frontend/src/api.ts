@@ -12,12 +12,12 @@ import { cleanSpeakerTags } from "./lib/audioUtils";
 const QUERY_API_BASE =
   import.meta.env.VITE_QUERY_API_URL ||
   import.meta.env.VITE_API_URL ||
-  "http://localhost:8000";
+  "/api";
 
 const BLOGPOST_API_BASE =
   import.meta.env.VITE_BLOGPOST_API_URL ||
   import.meta.env.VITE_API_URL ||
-  "http://localhost:8000";
+  "/api";
 
 async function request<T>(
   baseUrl: string,
