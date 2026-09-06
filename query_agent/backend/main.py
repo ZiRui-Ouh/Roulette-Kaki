@@ -627,8 +627,13 @@ def translate_text(req: TranslateRequest) -> dict:
 
 @app.post("/transcribe")
 def transcribe_endpoint(req: TranscribeRequest) -> dict:
+    if not req.audio_b64 or not req.audio_b64.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "empty_audio", "message": "No audio data received for transcription."},
+        )
     try:
-        text = translation_service.transcribe_audio(req.audio_b64, mime=req.mime)
+        text = translation_service.transcribe_audio(req.audio_b64.strip(), mime=req.mime)
     except MeraLionRateLimitError as e:
         raise HTTPException(
             status_code=429,
@@ -648,7 +653,7 @@ def transcribe_endpoint(req: TranscribeRequest) -> dict:
             status_code=502,
             detail={"error": "meralion_error", "message": str(e)},
         )
-    return {"transcript": text}
+    return {"text": text, "transcript": text}
 
 
 @app.post("/translate/audio")

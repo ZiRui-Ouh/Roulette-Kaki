@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from "react";
 import { SendHorizontal, Loader2 } from "lucide-react";
+import VoiceInputButton from "./VoiceInputButton";
 
 interface ChatInputProps {
   onSend: (question: string) => void;
@@ -48,6 +49,14 @@ export default function ChatInput({
     }
   };
 
+  const handleTranscript = (transcriptText: string) => {
+    setText((prev) => (prev ? `${prev} ${transcriptText}` : transcriptText));
+    setTimeout(() => {
+      handleInput();
+      textareaRef.current?.focus();
+    }, 50);
+  };
+
   return (
     <div className="relative rounded-2xl border border-slate-300/80 bg-white p-2 shadow-md transition focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100">
       <div className="flex items-end gap-2">
@@ -63,6 +72,11 @@ export default function ChatInput({
           placeholder={placeholder}
           disabled={isLoading}
           className="w-full max-h-36 resize-none bg-transparent px-3 py-2 text-sm sm:text-base text-slate-900 placeholder:text-slate-400 focus:outline-none disabled:opacity-50"
+        />
+
+        <VoiceInputButton
+          onTranscript={handleTranscript}
+          disabled={isLoading}
         />
 
         <button

@@ -7,6 +7,7 @@ import type {
   Lang,
   Sitting,
 } from "./types";
+import { cleanSpeakerTags } from "./lib/audioUtils";
 
 const QUERY_API_BASE =
   import.meta.env.VITE_QUERY_API_URL ||
@@ -73,6 +74,26 @@ export async function askQuery(
     method: "POST",
     body: JSON.stringify({ question, language, session_id: sessionId }),
   });
+}
+
+export interface TranscribeResponse {
+  text?: string;
+  transcript?: string;
+}
+
+/**
+ * Speech-to-Text API — sends audio to backend to transcribe via MERaLiON API.
+ */
+export async function transcribeAudio(
+  audioBase64: string,
+  mime: string = "audio/webm",
+): Promise<string> {
+  const res = await request<TranscribeResponse>(QUERY_API_BASE, "/transcribe", {
+    method: "POST",
+    body: JSON.stringify({ audio_b64: audioBase64, mime }),
+  });
+  const rawText = (res.text || res.transcript || "").trim();
+  return cleanSpeakerTags(rawText);
 }
 
 /**
