@@ -15,6 +15,7 @@ services:
       # you use a non-default profile.
       AWS_PROFILE: "hack2026_IsbUsersPS-388562170161"
     volumes:
-      # Read-only mount so the container can use your host AWS creds for
-      # Bedrock / DynamoDB / S3 without baking anything into the image.
-      - ~/.aws:/root/.aws:ro
+      # Read-write so botocore can rotate the SSO token cache under
+      # ~/.aws/sso/cache/. A read-only mount breaks SSO refresh — the
+      # token IS renewed but the write-back fails on tempfile creation.
+      - ~/.aws:/root/.aws
