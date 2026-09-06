@@ -1,10 +1,38 @@
+# Environment & Secrets
 .env
-.venv
-.claude
-*.md
+.env.*
+!.env.example
+!.env.development
+
 # Python
+.venv/
 __pycache__/
 *.py[cod]
-scripts
-../../.DS_Store
-tests/
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+**/node_modules/
+**/dist/
+**/.vite/
+
+# OS & Editor
+.DS_Store
+**/.DS_Store
+.claude/
+.vscode/
+.idea/
+
+# Internal scratch, walkthroughs & generator artifacts
+scratch/
+scripts/
+*.pdf
+generate_*.py
+
+# Legacy / superseded directories (migrated to application/)
+query_agent/
+BlogPost/
+search_agent/
+FactChecker/
