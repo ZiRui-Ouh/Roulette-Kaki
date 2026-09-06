@@ -44,6 +44,10 @@ The following dependencies are required to run the program:
 code blocks for commands
 ```
 
+### Further Technical explanation
+
+For further technical details read our [agents guide](AGENTS.md) and [architecture guide](ARCHITECTURE.md). 
+
 ## Authors
 
 Project Lead: Ouh Zi Rui
