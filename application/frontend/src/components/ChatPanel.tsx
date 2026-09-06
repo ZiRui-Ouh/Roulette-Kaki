@@ -5,6 +5,7 @@ import { loadDebateSession, saveDebateSession } from "../session";
 import { useLanguage } from "../contexts/LanguageContext";
 import type { ChatMessage, Digest } from "../types";
 import TopicSelector from "./TopicSelector";
+import VoiceInputButton from "./VoiceInputButton";
 import { Sparkles, Bot, AlertCircle, X, Send, ShieldCheck, HelpCircle, Layers } from "lucide-react";
 
 interface Props {
@@ -259,7 +260,7 @@ export default function ChatPanel({ digest, onSaveReplyAsFlashcards }: Props) {
           </div>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -274,10 +275,15 @@ export default function ChatPanel({ digest, onSaveReplyAsFlashcards }: Props) {
             className="flex-1 border border-stone-300 rounded-xl px-3 py-2 text-xs resize-none focus:outline-hidden focus:ring-1 focus:ring-stone-800 bg-white text-stone-900"
             disabled={busy}
           />
+          <VoiceInputButton
+            onTranscript={(text) => setInput((prev) => (prev ? `${prev} ${text}` : text))}
+            disabled={busy}
+            size="sm"
+          />
           <button
             onClick={() => handleSend()}
             disabled={busy || !input.trim()}
-            className="rounded-xl bg-stone-900 text-white text-xs px-3.5 py-2 font-semibold disabled:opacity-40 hover:bg-stone-800 transition flex items-center justify-center shrink-0 shadow-xs cursor-pointer"
+            className="rounded-xl bg-stone-900 text-white text-xs px-3.5 py-2 font-semibold disabled:opacity-40 hover:bg-stone-800 transition flex items-center justify-center shrink-0 shadow-xs cursor-pointer h-8 w-8"
           >
             <Send className="w-4 h-4" />
           </button>

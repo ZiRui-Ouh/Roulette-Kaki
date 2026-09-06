@@ -21,6 +21,7 @@ import {
 import { POLICIES } from "../data/policies";
 import { askQuery } from "../api";
 import { useLanguage } from "../contexts/LanguageContext";
+import VoiceInputButton from "../components/VoiceInputButton";
 import type { ChatMessage } from "../types";
 
 export default function PolicyArticlePage() {
@@ -120,6 +121,13 @@ export default function PolicyArticlePage() {
     navigator.clipboard.writeText(window.location.href);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const handleTranscript = (transcriptText: string) => {
+    setInputVal((prev) => (prev ? `${prev} ${transcriptText}` : transcriptText));
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 50);
   };
 
   if (!policy) {
@@ -433,6 +441,11 @@ export default function PolicyArticlePage() {
                 rows={1}
                 disabled={isLoading}
                 className="flex-1 resize-none py-2.5 px-3.5 rounded-xl border border-stone-300 bg-white text-xs sm:text-sm text-stone-900 placeholder-stone-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50"
+              />
+
+              <VoiceInputButton
+                onTranscript={handleTranscript}
+                disabled={isLoading}
               />
 
               <button
