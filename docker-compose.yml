@@ -1,0 +1,20 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: roulette-kaki:local
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      SERVE_STATIC: "1"
+      USE_LOCAL_STUBS: "0"
+      # AWS_PROFILE lets the mounted ~/.aws credentials resolve. Change if
+      # you use a non-default profile.
+      AWS_PROFILE: "hack2026_IsbUsersPS-388562170161"
+    volumes:
+      # Read-only mount so the container can use your host AWS creds for
+      # Bedrock / DynamoDB / S3 without baking anything into the image.
+      - ~/.aws:/root/.aws:ro

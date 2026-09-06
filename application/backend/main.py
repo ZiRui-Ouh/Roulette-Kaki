@@ -40,8 +40,10 @@ logging.basicConfig(
     force=True,
 )
 
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from agents import digest as digest_agent
@@ -70,6 +72,9 @@ app = FastAPI(
     ),
     version="1.0.0",
 )
+
+SERVE_STATIC = os.environ.get("SERVE_STATIC") == "1"
+
 
 def _resolve_cors_origins() -> list[str]:
     """CORS origin list.
@@ -102,13 +107,23 @@ def _resolve_cors_origins() -> list[str]:
     )
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_resolve_cors_origins(),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# SERVE_STATIC=1 means the container serves the built React app from the
+# same origin, so CORS is a no-op. In that mode we skip the middleware
+# entirely rather than adding it with an empty allow-list.
+if not SERVE_STATIC:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_resolve_cors_origins(),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+# All API endpoints are registered on this router; the router is mounted
+# under `/api` when SERVE_STATIC=1 so React SPA routes at `/` don't
+# collide with API paths. Under Lambda / dev-server mode the router is
+# mounted at root, preserving the historical bare paths.
+router = APIRouter()
 
 
 # --- Models ------------------------------------------------------------------
@@ -189,7 +204,7 @@ class FlashcardDeckResponse(BaseModel):
 
 # --- Root & Health -----------------------------------------------------------
 
-@app.get("/")
+@router.get("/")
 def root() -> dict:
     return {
         "service": "Singapore Policy & Parliamentary Intelligence API",
@@ -213,14 +228,14 @@ def root() -> dict:
     }
 
 
-@app.get("/health")
+@router.get("/health")
 def health() -> dict:
     return {"status": "ok", "service": "policy-and-parliament-api"}
 
 
 # --- Policy Query Agent ------------------------------------------------------
 
-@app.post("/query", response_model=QueryResponse)
+@router.post("/query", response_model=QueryResponse)
 def query(q: QueryRequest) -> dict:
     if not q.question or not q.question.strip():
         raise HTTPException(
@@ -256,7 +271,7 @@ def query(q: QueryRequest) -> dict:
     }
 
 
-@app.get("/query/sessions/{session_id}")
+@router.get("/query/sessions/{session_id}")
 def get_query_session(session_id: str):
     session = storage_service.get_session(session_id)
     if not session:
@@ -266,7 +281,7 @@ def get_query_session(session_id: str):
 
 # --- Parliamentary Debate Endpoints ------------------------------------------
 
-@app.get("/debates")
+@router.get("/debates")
 def list_debates() -> dict:
     # Diagnostic endpoint for "already-cached digests"; the frontend feed
     # uses /sittings. Returns [] under USE_LOCAL_STUBS.
@@ -274,7 +289,7 @@ def list_debates() -> dict:
     return {"debates": [DebateSummary(**d).model_dump() for d in items]}
 
 
-@app.get("/sittings")
+@router.get("/sittings")
 def get_sittings(limit: int = 6, offset: int = 0) -> dict:
     if limit < 1 or limit > 25 or offset < 0 or offset > 100:
         raise HTTPException(
@@ -293,7 +308,7 @@ def get_sittings(limit: int = 6, offset: int = 0) -> dict:
         )
 
 
-@app.get("/debates/{date}")
+@router.get("/debates/{date}")
 def get_debate(date: str, refresh: bool = False, language: Lang = "English") -> dict:
     try:
         result = digest_agent.run_digest(date, refresh=refresh)
@@ -484,7 +499,7 @@ support the answer. Do not speculate beyond the evidence.
     return combined, True
 
 
-@app.post("/debates/{date}/chat", response_model=ChatResponse)
+@router.post("/debates/{date}/chat", response_model=ChatResponse)
 def chat_debate(date: str, req: ChatRequest) -> ChatResponse:
     session_id = req.session_id or str(uuid.uuid4())
     # Result is populated inside the translation sandwich so that
@@ -548,7 +563,7 @@ def chat_debate(date: str, req: ChatRequest) -> ChatResponse:
 
 # --- Flashcards Agent --------------------------------------------------------
 
-@app.post(
+@router.post(
     "/debates/{date}/flashcards/topic/{topic_id}",
     response_model=FlashcardDeckResponse,
 )
@@ -591,7 +606,7 @@ def flashcards_from_topic(
     return FlashcardDeckResponse(**deck.model_dump())
 
 
-@app.post(
+@router.post(
     "/debates/{date}/flashcards/from-chat",
     response_model=FlashcardDeckResponse,
 )
@@ -616,7 +631,7 @@ def flashcards_from_chat(
 
 # --- Standalone Translation Endpoints ----------------------------------------
 
-@app.post("/translate")
+@router.post("/translate")
 def translate_text(req: TranslateRequest) -> dict:
     if not req.text or not req.text.strip():
         raise HTTPException(
@@ -649,7 +664,7 @@ def translate_text(req: TranslateRequest) -> dict:
     return {"translated_text": out, "target_language": req.target_language}
 
 
-@app.post("/transcribe")
+@router.post("/transcribe")
 def transcribe_endpoint(req: TranscribeRequest) -> dict:
     if not req.audio_b64 or not req.audio_b64.strip():
         raise HTTPException(
@@ -680,7 +695,7 @@ def transcribe_endpoint(req: TranscribeRequest) -> dict:
     return {"text": text, "transcript": text}
 
 
-@app.post("/translate/audio")
+@router.post("/translate/audio")
 def translate_audio_endpoint(req: TranslateAudioRequest) -> dict:
     try:
         text = translation_service.translate_audio(
@@ -713,3 +728,42 @@ def translate_audio_endpoint(req: TranslateAudioRequest) -> dict:
             detail={"error": "meralion_error", "message": str(e)},
         )
     return {"translated_text": text, "target_language": req.target_language}
+
+
+# --- Router mount + static frontend ------------------------------------------
+#
+# In SERVE_STATIC mode (single-container docker deploy) the router is
+# mounted at `/api/*` and the built React app is served from `/`. In the
+# original API-only mode (Lambda / local uvicorn) the router is mounted
+# at root so all existing paths (`/query`, `/debates`, …) keep working.
+
+if SERVE_STATIC:
+    app.include_router(router, prefix="/api")
+
+    _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+    _INDEX_HTML = os.path.join(_STATIC_DIR, "index.html")
+
+    # `html=True` makes StaticFiles serve `index.html` for the mount root,
+    # but not for arbitrary sub-paths — that's what the catch-all below
+    # handles for react-router client-side routes.
+    app.mount(
+        "/assets",
+        StaticFiles(directory=os.path.join(_STATIC_DIR, "assets")),
+        name="assets",
+    )
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_fallback(full_path: str, request: Request):
+        # Unknown /api/* must stay a JSON 404 — the frontend parses these
+        # as errors and would break on HTML.
+        if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=404, detail="Not Found")
+        # Serve files that actually exist under static/ (favicon.svg,
+        # icons.svg, etc.), otherwise fall through to index.html so
+        # react-router can handle the route on the client.
+        candidate = os.path.join(_STATIC_DIR, full_path)
+        if full_path and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(_INDEX_HTML)
+else:
+    app.include_router(router)

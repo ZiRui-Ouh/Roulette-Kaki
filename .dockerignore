@@ -1,0 +1,38 @@
+.git
+.gitignore
+.venv
+.env
+.env.*
+.DS_Store
+.claude/
+.vscode/
+.idea/
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Node
+**/node_modules/
+**/dist/
+**/.vite/
+
+# Repo-level bulk that never belongs in the image
+terraform/
+deploy/
+scratch/
+scripts/
+*.pdf
+generate_*.py
+implementation_plan.pdf
+walkthrough.pdf
+
+# Local backend caches
+application/backend/__pycache__/
+application/backend/**/__pycache__/
+application/backend/fixtures/
+application/backend/tests/
