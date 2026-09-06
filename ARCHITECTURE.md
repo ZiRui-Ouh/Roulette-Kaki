@@ -20,6 +20,8 @@ The backend combines four user-facing capabilities in one service:
 
 ## System Shape
 
+![Agent architecture: a user query flows through the Main Agent to a Search Orchestration Agent that fans out in parallel to Official and Community search agents. Results feed a DAG multi-agent pipeline (Query Refiner → Web Search → Content Extractor + Relevance Filter → Aggregator), then a Verification & Reasoning stage (Verification Agent → Answer Synthesis Agent) produces the final answer with sources and citations back to the user.](docs/images/agent-architecture.png)
+
 The browser talks to the same FastAPI application for all product features.
 In local development Vite serves the SPA and the backend serves API routes.
 When `SERVE_STATIC=1`, the backend serves the built SPA from `static/` and

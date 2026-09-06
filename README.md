@@ -190,7 +190,7 @@ See [Configuration](#7-configuration) for the full list.
 
 Configuration is loaded from environment variables. Local dev uses a `.env` file at the repo root; the Docker image reads the same file via `env_file:` in compose.
 
-**Never commit `.env`** — it is `.gitignore`d and `.dockerignore`d. Rotate any key that lands in the repo history.
+**Never commit `.env`** — it is `.gitignore` and `.dockerignore`. Rotate any key that lands in the repo history.
 
 ### Required for real-AWS mode
 
@@ -309,7 +309,7 @@ Utility scripts under [`scripts/`](scripts/):
 
 One-off debugging scripts (not part of any deploy) live in [`scratch/`](scratch/).
 
-Terraform module lives in [`terraform/`](terraform/); apply it once before running the backend against real AWS — see [Infrastructure Setup](#13-infrastructure-setup-terraform) for the full walkthrough. Bootstrap scripts for the AWS environment live in [`deploy/`](deploy/).
+Terraform module lives in [`terraform/`](terraform/); apply it once before running the backend against real AWS — see [Infrastructure Setup](#13-infrastructure-setup-terraform) for the full walkthrough. Bootstrap scripts for the AWS environment live in [`terrafoorm/deploy/`](terraforn/deploy/).
 
 ## 13. Infrastructure Setup (Terraform)
 
@@ -322,7 +322,7 @@ The AWS backing services the backend depends on (Bedrock, DynamoDB tables, S3 ca
 - [`terraform/s3.tf`](terraform/s3.tf) — `parl-debate-cache-v2` cache bucket.
 - [`terraform/backend.tf`](terraform/backend.tf) — declares the S3 remote backend as *partial config*; the bucket / key / lock-table are passed via `-backend-config` on `terraform init` (keeps account IDs out of git).
 - [`terraform/variables.tf`](terraform/variables.tf) — knobs for region + resource names.
-- [`deploy/00_bootstrap.sh`](deploy/00_bootstrap.sh) — one-time script that creates the shared state bucket + lock table.
+- [`terraform/deploy/00_bootstrap.sh`](terraform/deploy/00_bootstrap.sh) — one-time script that creates the shared state bucket + lock table.
 
 ### One-time bootstrap (run once per AWS account)
 
@@ -331,7 +331,7 @@ Only one teammate needs to do this. The script is idempotent — re-running it a
 Prereqs: AWS CLI v2 authenticated (`aws sts get-caller-identity` works) and `jq` installed.
 
 ```bash
-./deploy/00_bootstrap.sh
+./terraform/deploy/00_bootstrap.sh
 ```
 
 The script provisions:
