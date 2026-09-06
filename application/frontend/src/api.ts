@@ -19,6 +19,9 @@ const BLOGPOST_API_BASE =
   import.meta.env.VITE_API_URL ||
   "/api";
 
+// All frontend requests pass through this function. It adds JSON headers,
+// converts failed HTTP responses into one consistent error shape, and returns
+// the decoded JSON for the page or component that asked for it.
 async function request<T>(
   baseUrl: string,
   path: string,
@@ -70,6 +73,7 @@ export async function askQuery(
   language: Lang = "English",
   sessionId?: string,
 ): Promise<QueryResponse> {
+  // The backend uses sessionId to remember earlier policy questions.
   return request<QueryResponse>(QUERY_API_BASE, "/query", {
     method: "POST",
     body: JSON.stringify({ question, language, session_id: sessionId }),
@@ -100,6 +104,8 @@ export async function transcribeAudio(
  * Debate Digest & Sitting API endpoints
  */
 export function listDebates(): Promise<{ debates: DebateSummary[] }> {
+  // Debate endpoints are kept separate from policy-query endpoints because
+  // they use the sitting and digest workflow.
   return request(BLOGPOST_API_BASE, "/debates");
 }
 

@@ -16,6 +16,8 @@ from services.webscraper import (
 
 log = logging.getLogger(__name__)
 
+# Search collects and structures evidence. It does not write the final answer;
+# the policy Query Agent uses this evidence after source checks.
 
 SEARCH_SYNTHESIS_PROMPT = """
 You are the Search Agent for a Singapore policy intelligence platform.

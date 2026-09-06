@@ -394,6 +394,8 @@ def verify_evidence(
     unofficial_sources: List[Dict[str, Any]],
     plan: MainAgentPlan,
 ) -> VerificationResult:
+    # Verification keeps official facts, community observations, and older or
+    # conflicting sources separate before the answer is written.
     """
     Core verification entrypoint:
     - Filters and ranks official sources

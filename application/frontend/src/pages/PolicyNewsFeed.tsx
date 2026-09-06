@@ -20,6 +20,8 @@ interface OutletContextType {
 }
 
 export default function PolicyNewsFeed() {
+  // The home page presents the local policy feed. Category and search state
+  // come from App so the header and feed stay synchronized.
   const outletCtx = useOutletContext<OutletContextType>() || {
     selectedCategory: "All",
     setSelectedCategory: () => {},

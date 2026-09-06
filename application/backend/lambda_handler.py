@@ -7,4 +7,5 @@ from mangum import Mangum
 
 from main import app
 
+# Mangum converts AWS Lambda events into the HTTP requests FastAPI expects.
 handler = Mangum(app, lifespan="off")

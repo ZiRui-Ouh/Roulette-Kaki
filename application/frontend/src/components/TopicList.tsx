@@ -8,6 +8,7 @@ interface Props {
   onGenerateFlashcards?: (topic: Topic) => void;
 }
 
+// Lists the reports in a sitting and forwards a topic-card request upward.
 export default function TopicList({ topics, onGenerateFlashcards }: Props) {
   const [filter, setFilter] = useState("");
 

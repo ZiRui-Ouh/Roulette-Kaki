@@ -10,6 +10,7 @@ interface Props {
 
 const MAX_RESULTS = 12;
 
+// Gives the research agent an explicit report topic to attach to the chat.
 export default function TopicSelector({ topics, onSelect }: Props) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);

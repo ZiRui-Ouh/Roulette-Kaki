@@ -6,6 +6,8 @@ export interface StoredSession {
   messages: ChatMessage[];
 }
 
+// Browser storage keeps the conversation available after a refresh. Keys are
+// separated by language so changing language never mixes different scripts.
 // Chat histories are bucketed per language so a mid-conversation
 // language flip doesn't mix scripts inside the same thread. Existing
 // pre-i18n keys (`chat:{date}`, `query_agent:messages`) are the same as
@@ -19,6 +21,8 @@ export function loadDebateSession(
   date: string,
   language: Lang = "English",
 ): StoredSession | null {
+  // Loading is intentionally forgiving: missing or invalid browser data means
+  // a fresh conversation rather than a broken page.
   try {
     const raw = localStorage.getItem(debateKey(date, language));
     return raw ? (JSON.parse(raw) as StoredSession) : null;
@@ -32,6 +36,8 @@ export function saveDebateSession(
   session: StoredSession,
   language: Lang = "English",
 ): void {
+  // Saving is best-effort because private browsing or a full storage quota
+  // should not prevent the live chat from working.
   try {
     localStorage.setItem(debateKey(date, language), JSON.stringify(session));
   } catch {

@@ -1,6 +1,7 @@
 import type { Digest } from "../types";
 import { Sparkles, Layers } from "lucide-react";
 
+// Presents the digest text and category counts returned by the backend.
 export default function DigestSummary({ digest }: { digest: Digest }) {
   const cats = Object.entries(digest.category_breakdown || {});
   return (

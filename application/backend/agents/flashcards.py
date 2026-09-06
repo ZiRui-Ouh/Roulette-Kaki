@@ -33,6 +33,9 @@ from schemas import Flashcard, FlashcardDeck
 from services import bedrock, scraper, storage
 from services.scraper import TopicMeta
 
+# Flashcards are a presentation step: summarize an existing report or chat
+# reply into short cards without creating another research session.
+
 log = logging.getLogger(__name__)
 
 

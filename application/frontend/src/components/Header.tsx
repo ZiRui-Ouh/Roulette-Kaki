@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { MessageSquareText, FileText } from "lucide-react";
 
+// Shared legacy header used by screens that need simple application branding.
 export default function Header() {
   const location = useLocation();
 

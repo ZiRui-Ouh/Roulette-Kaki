@@ -11,11 +11,14 @@ export interface OutletContextType {
 }
 
 export default function App() {
+  // App owns the small amount of state shared by the header and the page
+  // below it. Child pages receive this state through the router outlet.
   const [selectedCategory, setSelectedCategory] =
     useState<PolicyCategory | "All">("All");
   const [searchQuery, setSearchQuery] = useState("");
 
   return (
+    // This shell stays visible while the route inside <Outlet /> changes.
     <div className="min-h-screen flex flex-col bg-[#fdfcfb] text-stone-900 selection:bg-indigo-600 selection:text-white font-sans antialiased">
       <NewsHeader
         selectedCategory={selectedCategory}
@@ -24,6 +27,7 @@ export default function App() {
         onSearchChange={setSearchQuery}
       />
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        {/* The current route renders here without recreating the shell. */}
         <Outlet
           context={{
             selectedCategory,

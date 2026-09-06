@@ -35,6 +35,8 @@ STUB_MODE = os.environ.get("USE_LOCAL_STUBS") == "1"
 
 log = logging.getLogger(__name__)
 
+# Agents use this module instead of calling AWS directly. DynamoDB stores
+# digests and sessions; S3 stores reusable raw Hansard reports.
 _ddb_singleton = None
 _s3_singleton = None
 

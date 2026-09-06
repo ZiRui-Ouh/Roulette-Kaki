@@ -25,6 +25,8 @@ import VoiceInputButton from "../components/VoiceInputButton";
 import type { ChatMessage } from "../types";
 
 export default function PolicyArticlePage() {
+  // This page reads the policy id from the URL and displays the matching
+  // article from the local policy data set.
   const { id } = useParams<{ id: string }>();
   const policy = POLICIES.find((p) => p.id === id);
   const { language } = useLanguage();

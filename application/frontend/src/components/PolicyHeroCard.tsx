@@ -13,6 +13,7 @@ interface PolicyHeroCardProps {
   policy: Policy;
 }
 
+// Highlights the most important policy item selected by the feed page.
 export default function PolicyHeroCard({ policy }: PolicyHeroCardProps) {
   return (
     <article className="group relative bg-white border border-stone-200/90 rounded-2xl shadow-xs overflow-hidden hover:shadow-md transition-all duration-300">

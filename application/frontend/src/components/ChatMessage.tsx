@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { Check, Copy, Sparkles, User, ShieldCheck } from "lucide-react";
 import type { ChatMessage as ChatMessageType } from "../types";
 
+// Displays one user or assistant message, including formatted answer text.
 export default function ChatMessage({
   role,
   content,

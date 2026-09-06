@@ -1,5 +1,6 @@
 import type { Policy, PolicyCategory } from "../types";
 
+// These local records power the news-style policy feed and article pages.
 export const CATEGORIES: { id: PolicyCategory | "All"; label: string }[] = [
   { id: "All", label: "All Policy Desks" },
   { id: "Housing", label: "Housing & BTO" },

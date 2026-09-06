@@ -24,6 +24,8 @@ import httpx
 
 log = logging.getLogger(__name__)
 
+# MERaLiON is used only for browser audio paths; normal text translation stays
+# behind the shared Bedrock translation service.
 
 def _clean_speaker_tags(text: str) -> str:
     """Strip speaker labels like `<Speaker1>: `, `<speaker 1>: `, `[Speaker 1]: `, `Speaker 1: `."""

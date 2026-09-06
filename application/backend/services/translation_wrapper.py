@@ -38,6 +38,8 @@ def with_translation(
     source_text: str,
     run: Callable[[str], str],
 ) -> str:
+    # English takes the fast path. Other languages go to English for the agent
+    # and the completed answer is translated back before it reaches the UI.
     """Wrap a feature call with input+output translation when the user's
     language is non-English. Returns the (translated) final string.
 

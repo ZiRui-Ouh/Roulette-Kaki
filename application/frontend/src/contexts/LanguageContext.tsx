@@ -19,6 +19,8 @@ interface LanguageContextValue {
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
+// The selected language starts from browser storage, then is shared with all
+// pages and saved again whenever the user changes it.
 function readStored(): Lang {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -55,6 +57,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({ language, setLanguage }), [language, setLanguage]);
 
   return (
+    // Pages access the same language through useLanguage().
     <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>
   );
 }

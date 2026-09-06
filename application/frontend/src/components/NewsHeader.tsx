@@ -19,6 +19,7 @@ interface NewsHeaderProps {
   onSearchChange?: (query: string) => void;
 }
 
+// Provides global navigation, policy filtering, search, and language controls.
 export default function NewsHeader({
   selectedCategory = "All",
   onSelectCategory,

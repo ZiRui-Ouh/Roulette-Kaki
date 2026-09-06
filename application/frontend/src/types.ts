@@ -1,3 +1,4 @@
+// Shared types keep API responses, saved sessions, and components consistent.
 export type Lang =
   | "English"
   | "Chinese"

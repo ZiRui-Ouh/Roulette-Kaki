@@ -1,3 +1,8 @@
+# The Query Agent turns a user policy question into a grounded answer.
+# It builds context, asks the search tool for evidence, checks that the
+# evidence matches the requested category, and gives the model only that
+# context for the final response.
+
 import logging
 import os
 import re
@@ -197,6 +202,8 @@ def build_prompt(
     official_facts: list[dict] | None = None,
     time_scope: str = "current",
 ) -> str:
+    # The prompt keeps official evidence, community evidence, prior turns, and
+    # the selected time period separate so the answer does not mix categories.
 
     now_utc = datetime.now(timezone.utc)
     current_date_str = now_utc.strftime("%B %Y")

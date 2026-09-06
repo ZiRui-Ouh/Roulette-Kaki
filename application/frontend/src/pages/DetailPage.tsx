@@ -12,6 +12,8 @@ import YoutubeThumbnail from "../components/YoutubeThumbnail";
 import { ArrowLeft, RefreshCw, Calendar, AlertCircle, Play, Video, FileText } from "lucide-react";
 
 export default function DetailPage() {
+  // A detail page loads one sitting digest, then passes that digest to the
+  // summary, topic, chat, video, and flashcard sections below.
   const { date } = useParams<{ date: string }>();
   const { language } = useLanguage();
   const [digest, setDigest] = useState<Digest | null>(null);
@@ -40,6 +42,8 @@ export default function DetailPage() {
   const closeDrawer = useCallback(() => setFlashcardSource(null), []);
 
   useEffect(() => {
+    // A route or language change starts a new load. The cancellation guard
+    // prevents an older response from replacing the newer page state.
     if (!date) return;
     let cancelled = false;
     setDigest(null);

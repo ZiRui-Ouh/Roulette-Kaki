@@ -48,6 +48,8 @@ import httpx
 
 log = logging.getLogger(__name__)
 
+# The sitting service converts a YouTube playlist into dated Parliament feed
+# items and caches the result so the frontend can paginate through it.
 YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3/playlistItems"
 CACHE_TTL_SECONDS = int(os.environ.get("SITTINGS_CACHE_TTL_SECONDS", "600"))
 REQUEST_TIMEOUT = 15.0

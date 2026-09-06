@@ -203,6 +203,8 @@ class FlashcardDeckResponse(BaseModel):
 
 
 # --- Root & Health -----------------------------------------------------------
+# These small endpoints let the frontend and deployment platform confirm that
+# the FastAPI application started and expose the routes it provides.
 
 @router.get("/")
 def root() -> dict:
@@ -234,6 +236,8 @@ def health() -> dict:
 
 
 # --- Policy Query Agent ------------------------------------------------------
+# The policy path validates the question, translates it when needed, and then
+# lets the Query Agent search, verify, and write the final answer.
 
 @router.post("/query", response_model=QueryResponse)
 def query(q: QueryRequest) -> dict:
@@ -243,7 +247,7 @@ def query(q: QueryRequest) -> dict:
             detail={"error": "empty_question", "message": "question must be non-empty"},
         )
 
-    # Capture session_id from inside the translation sandwich so it makes
+    # Capture session_id from inside the translation wrapper so it makes
     # it back to the client even on the non-English (wrapped) path.
     captured = {"session_id": q.session_id or ""}
 
@@ -280,6 +284,8 @@ def get_query_session(session_id: str):
 
 
 # --- Parliamentary Debate Endpoints ------------------------------------------
+# Debate pages follow a cache-first path: list sittings, load or create a
+# digest for one date, then attach selected reports when the user chats.
 
 @router.get("/debates")
 def list_debates() -> dict:
@@ -310,6 +316,8 @@ def get_sittings(limit: int = 6, offset: int = 0) -> dict:
 
 @router.get("/debates/{date}")
 def get_debate(date: str, refresh: bool = False, language: Lang = "English") -> dict:
+    # The digest agent does the expensive work only when this date is missing
+    # or the caller explicitly asks for a refresh.
     try:
         result = digest_agent.run_digest(date, refresh=refresh)
     except NotImplementedError:
@@ -415,6 +423,8 @@ def _web_fallback_reply(
     Returns (combined_reply, grounded=True) on success, or None when the
     fallback is disabled, out of scope for this intent, or fails.
     """
+    # A Hansard answer that lacks the requested fact may use the policy search
+    # path, but only for factual intents where broader sources make sense.
     if os.environ.get("ENABLE_WEB_FALLBACK", "1") != "1":
         return None
 
@@ -501,6 +511,8 @@ support the answer. Do not speculate beyond the evidence.
 
 @router.post("/debates/{date}/chat", response_model=ChatResponse)
 def chat_debate(date: str, req: ChatRequest) -> ChatResponse:
+    # Each chat turn loads the selected debate report, asks the research agent,
+    # optionally searches broader policy sources, and returns one reply.
     session_id = req.session_id or str(uuid.uuid4())
     # Result is populated inside the translation sandwich so that
     # topics_used / grounded are captured from the ONE agent call whose
@@ -633,6 +645,8 @@ def flashcards_from_chat(
 
 @router.post("/translate")
 def translate_text(req: TranslateRequest) -> dict:
+    # Text translation is exposed separately for clients that need only a
+    # language conversion and do not need the policy agent.
     if not req.text or not req.text.strip():
         raise HTTPException(
             status_code=400,
@@ -666,6 +680,8 @@ def translate_text(req: TranslateRequest) -> dict:
 
 @router.post("/transcribe")
 def transcribe_endpoint(req: TranscribeRequest) -> dict:
+    # Audio first becomes text; the frontend can then place that text into its
+    # normal input flow.
     if not req.audio_b64 or not req.audio_b64.strip():
         raise HTTPException(
             status_code=400,
@@ -697,6 +713,7 @@ def transcribe_endpoint(req: TranscribeRequest) -> dict:
 
 @router.post("/translate/audio")
 def translate_audio_endpoint(req: TranslateAudioRequest) -> dict:
+    # This endpoint performs speech recognition and translation in one step.
     try:
         text = translation_service.translate_audio(
             req.audio_b64,

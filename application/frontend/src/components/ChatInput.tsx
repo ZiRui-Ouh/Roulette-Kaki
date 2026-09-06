@@ -8,6 +8,7 @@ interface ChatInputProps {
   placeholder?: string;
 }
 
+// Collects a message from the user and sends it to the parent chat workflow.
 export default function ChatInput({
   onSend,
   isLoading,

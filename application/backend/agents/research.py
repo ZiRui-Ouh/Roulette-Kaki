@@ -33,6 +33,9 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+# Research chat uses only the selected Hansard reports. It loads missing
+# reports lazily, keeps a short-lived session, and labels unsupported answers.
+
 from services import bedrock, scraper, storage
 from services.scraper import TopicMeta
 

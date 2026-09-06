@@ -22,6 +22,8 @@ except ImportError:  # pragma: no cover
 
 log = logging.getLogger(__name__)
 
+# All model calls pass through this service so agents share model settings,
+# local simulation behavior, document limits, and usage logging.
 REGION = os.environ.get("BEDROCK_REGION", os.environ.get("AWS_REGION", "us-east-1"))
 MODEL_NOVA_LITE = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
 MODEL_NOVA_PRO = "amazon.nova-pro-v1:0"

@@ -11,6 +11,7 @@ interface VoiceInputButtonProps {
   size?: "sm" | "md";
 }
 
+// Records audio, sends it for transcription, and returns text to the input.
 export default function VoiceInputButton({
   onTranscript,
   disabled = false,

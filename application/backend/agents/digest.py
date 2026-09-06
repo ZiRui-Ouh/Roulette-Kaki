@@ -41,6 +41,8 @@ from services.scraper import TopicMeta, list_topics
 
 log = logging.getLogger(__name__)
 
+# A digest follows a cache-first path: reuse a saved sitting summary or create
+# one from the date's topic list and save it for the next request.
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
 _JSON_BLOCK_RE = re.compile(r"<json>(.*?)</json>", re.DOTALL)
@@ -79,6 +81,8 @@ def run_digest(date: str, refresh: bool = False) -> dict:
     `{"error": "no_sitting", "date": date}` if no sitting was held.
     Never writes a DDB row for no-sitting dates.
     """
+    # A cache hit ends the flow early. Refresh is reserved for deliberate
+    # regeneration of a stored digest.
     if not refresh:
         cached = storage.get_digest(date)
         if cached is not None:

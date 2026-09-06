@@ -2,6 +2,7 @@ import { Languages } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 import { LANGUAGES, type Lang } from "../types";
 
+// Lets the user change the shared language used by pages and API requests.
 export default function LanguageSwitcher() {
   const { language, setLanguage } = useLanguage();
 

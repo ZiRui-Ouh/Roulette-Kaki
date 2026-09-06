@@ -16,6 +16,7 @@ interface Props {
 // by natural dimensions so we can swap to our own fallback card.
 const GHOST_MAX_WIDTH = 120;
 
+// Loads a YouTube thumbnail and provides a fallback when no usable video exists.
 export default function YoutubeThumbnail({
   videoId,
   alt,

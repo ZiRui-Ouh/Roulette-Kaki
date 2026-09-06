@@ -10,6 +10,7 @@ function dedupById<T extends { topic_id: string }>(items: T[]): T[] {
   });
 }
 
+// Shows the topics the digest agent selected as especially noteworthy.
 export default function InterestingTopics({ digest }: { digest: Digest }) {
   if (!digest.interesting_topics || digest.interesting_topics.length === 0)
     return null;

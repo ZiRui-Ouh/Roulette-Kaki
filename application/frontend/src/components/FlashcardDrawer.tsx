@@ -34,6 +34,7 @@ interface Props {
   onClose: () => void;
 }
 
+// Generates, displays, and locally saves cards created from a topic or reply.
 export default function FlashcardDrawer({
   open,
   date,

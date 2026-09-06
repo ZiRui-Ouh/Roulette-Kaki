@@ -24,6 +24,8 @@ TimeScope = Literal["current", "historical", "upcoming", "general"]
 
 AgentType = Literal["official_search", "community_search", "verification"]
 
+# These models define the structured messages shared by the planner, search,
+# verification, and API layers.
 
 class SearchQueries(BaseModel):
     official: List[str] = Field(default_factory=list, description="Targeted queries for official gov.sg sources")

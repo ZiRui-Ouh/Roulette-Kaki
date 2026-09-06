@@ -10,6 +10,7 @@ interface PolicyNewsCardProps {
   policy: Policy;
 }
 
+// Renders one searchable policy item in the local news feed.
 export default function PolicyNewsCard({ policy }: PolicyNewsCardProps) {
   const getCategoryColor = (cat: string) => {
     switch (cat) {

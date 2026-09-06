@@ -18,6 +18,8 @@ import os
 
 log = logging.getLogger(__name__)
 
+# Configuration runs during application startup so later service imports see
+# the correct environment values without each service loading secrets itself.
 # SSM path prefix (with trailing slash) → env var mapping. Add new keys here
 # as more secrets move to SSM; TF `ssm.tf` provisions the parameters and the
 # Lambda IAM role's `ssm:GetParametersByPath` grants read.

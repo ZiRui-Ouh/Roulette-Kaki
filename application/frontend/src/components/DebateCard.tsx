@@ -3,6 +3,7 @@ import { Calendar, Video, ArrowRight, FileText } from "lucide-react";
 import type { DebateSummary } from "../types";
 import YoutubeThumbnail from "./YoutubeThumbnail";
 
+// Turns one sitting summary into a link the user can open for its digest.
 export default function DebateCard({ debate }: { debate: DebateSummary }) {
   const youtubeId = extractYoutubeId(debate.youtube_url);
   return (

@@ -9,6 +9,8 @@ import { Video, RefreshCw, FileText, ArrowRight, ShieldCheck, Sparkles, Building
 const PAGE_SIZE = 6;
 
 export default function FeedPage() {
+  // The feed starts with the newest parliamentary sittings and keeps the
+  // pagination position so the user can request older records on demand.
   const [sittings, setSittings] = useState<Sitting[]>([]);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -22,6 +24,8 @@ export default function FeedPage() {
 
   // Initial load on mount.
   useEffect(() => {
+    // The cancellation flag prevents a slow response from updating a page
+    // that the user has already left.
     let cancelled = false;
     listSittings(PAGE_SIZE, 0)
       .then((data) => {
@@ -50,6 +54,8 @@ export default function FeedPage() {
   }, []);
 
   async function loadMore() {
+    // Pagination stops while another request is running or when the backend
+    // says that there are no more sittings.
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {

@@ -40,6 +40,8 @@ const SUGGESTED_TOPICS = [
 ];
 
 export default function QueryPage() {
+  // This page is the policy question workflow: restore local history, send a
+  // question to the backend, then append the returned answer to the chat.
   const { language } = useLanguage();
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -69,6 +71,8 @@ export default function QueryPage() {
   };
 
   const handleSend = async (question: string) => {
+    // Show the user's message immediately, then replace the loading state with
+    // either the agent's answer or a clear connection error.
     const userMsg: ChatMessageType = {
       role: "user",
       content: question,

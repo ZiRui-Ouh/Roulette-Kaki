@@ -15,6 +15,8 @@ from agents.search import gather_and_search
 
 log = logging.getLogger(__name__)
 
+# This boundary supports both deployment choices: call a remote Search Agent
+# when configured, or use the local search module with the same result shape.
 
 def fetch_from_search_agent(
     question: str,

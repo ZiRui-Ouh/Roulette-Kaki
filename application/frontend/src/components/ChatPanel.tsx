@@ -13,6 +13,7 @@ interface Props {
   onSaveReplyAsFlashcards?: (replyText: string, topicIdsUsed: string[]) => void;
 }
 
+// Owns one sitting's chat state: restore history, send turns, and save replies.
 export default function ChatPanel({ digest, onSaveReplyAsFlashcards }: Props) {
   const { language } = useLanguage();
   const [sessionId, setSessionId] = useState<string | null>(null);

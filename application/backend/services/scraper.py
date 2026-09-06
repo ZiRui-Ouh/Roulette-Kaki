@@ -43,6 +43,8 @@ class TopicMeta:
 
 
 def list_topics(date: str) -> list[TopicMeta]:
+    # Fixture mode keeps local development predictable; SPRS mode retrieves
+    # the same topic list from the live Parliament search service.
     """Topics debated on `date`, or [] if no sitting was held.
 
     Each returned topic has a stable `topic_id` usable as an S3 cache key
@@ -69,6 +71,7 @@ def _list_topics_from_fixture(date: str) -> list[TopicMeta]:
 
 
 def fetch_report(topic: TopicMeta) -> bytes:
+    # Full report content is fetched only when a research chat needs a topic.
     """Fetch raw report bytes for a topic. Used by the research agent
     (Phase 4) — reports are scraped lazily on first user mention, not
     up-front at digest time.
