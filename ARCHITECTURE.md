@@ -1,9 +1,12 @@
 # Architecture — Roulette-Kaki
 
-This repo contains three sibling features built for the SimplifyNext /
-Agentic AI Hackathon. **BlogPost** is the primary feature and the only one
-covered in detail below; **Chatbot** and **Translation** are separate feature
-directories with their own agents and are documented in their own trees.
+Roulette-Kaki was built for the SimplifyNext / Agentic AI Hackathon. All
+features — Parliament Debate Digest, Policy Query Agent, search stack,
+translation, flashcards — ship in one FastAPI service under
+[`application/backend/`](application/backend/) and one React SPA under
+[`application/frontend/`](application/frontend/). The pre-consolidation
+folders `BlogPost/`, `Chatbot/`, `Translation/`, and `search_agent/` no
+longer exist.
 
 The single hard constraint that shapes every decision: **$30 total spend
 across all AWS services and LLM calls for the full hackathon.** If a design
@@ -12,7 +15,7 @@ volume, it's wrong.
 
 ---
 
-## BlogPost — Parliament Debate Digest
+## Parliament Debate Digest
 
 A blog-style feed where each post represents one Singapore Parliament sitting
 day. Users can drill into a date, see an AI-generated digest of what was
@@ -166,7 +169,47 @@ views:
 
 ---
 
-## Chatbot / Translation
+## Policy Query Agent + Search Stack
 
-Separate feature trees with their own agents and their own architecture
-notes. Not covered here — see their respective directories.
+See [`AGENTS.md`](AGENTS.md) for full agent contracts. Data flow:
+
+```
+┌──────────┐   POST /query           ┌──────────────────────────┐
+│ Frontend │────────────────────────>│ Lambda (FastAPI+Mangum)  │
+│  React   │<──── grounded answer ───│  behind Function URL     │
+└──────────┘                         └──────────────────────────┘
+                                          │
+                                          ▼
+                                   ┌──────────────────┐
+                                   │ agents/query.py  │
+                                   │ (agentic loop,   │
+                                   │  Nova Lite tools)│
+                                   └──────────────────┘
+                                          │  search_policy tool call
+                                          ▼
+                                   ┌──────────────────────────────┐
+                                   │ services/search_service.py   │
+                                   │   → agents/search.py         │
+                                   │   → services/webscraper.py   │
+                                   │      (rank, verify, dedupe)  │
+                                   └──────────────────────────────┘
+                                          │
+                                          ▼
+                                   Official .gov.sg + community forums
+```
+
+The Policy Query Agent runs on Nova Lite (`converse_with_tools`), the
+search stack synthesizes with the same model, and results feed the final
+grounded answer with strict category separation (Singles vs Families,
+BTO vs Resale, current vs historical).
+
+## Translation + Flashcards
+
+- `services/translation.py::translate_to_english` normalizes incoming
+  Chinese/Malay/Tamil/Singlish questions to English before Query Agent
+  routing. Uses Nova Lite plus MERaLiON for Singlish/audio.
+- `services/meralion.py` provides ASR for the `POST /transcribe` route.
+- `agents/flashcards.py` generates study flashcards from digest content.
+
+All three sit inside the same FastAPI app — no separate deploys, no
+cross-service network hops.

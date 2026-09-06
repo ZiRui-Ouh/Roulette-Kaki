@@ -15,7 +15,7 @@ provider "aws" {
   default_tags {
     tags = {
       Project     = "Roulette-Kaki"
-      Feature     = "BlogPost"
+      Feature     = "application"
       ManagedBy   = "Terraform"
       Environment = "hackathon"
     }

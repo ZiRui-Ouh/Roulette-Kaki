@@ -3,12 +3,13 @@
 This file documents the AI agents used across the repo's features. See
 `ARCHITECTURE.md` for how they fit into the overall system.
 
-Currently populated for **BlogPost** only. **Chatbot** and **Translation**
-agents will be added when those features begin implementation.
+All agents live under [`application/backend/agents/`](application/backend/agents/)
+and share `services/bedrock.py`, `services/storage.py`, `services/scraper*.py`,
+and the search stack in `services/webscraper.py`.
 
 ---
 
-## BlogPost — Parliament Debate Digest
+## Parliament Debate Digest
 
 Two independent agents, sharing one cache tier (S3 raw reports). Neither
 agent uses embeddings — this is a deliberate budget decision, see
@@ -140,31 +141,51 @@ Rules:
   the user didn't pick a topic), return a helpful reply asking them to
   pick one — do not answer from general knowledge.
 
-## QueryAgent & SearchAgent — Singapore Policy Intelligence
+## Query Agent + Search Stack — Singapore Policy Intelligence
 
-Two cooperating agents providing accurate, up-to-date policy information and public sentiment insights.
+Two cooperating layers providing accurate, up-to-date policy information
+and public sentiment insights. Both live in the same FastAPI service under
+`application/backend/`; the split is logical, not deployment-wise.
 
-### 1. Policy Query Agent (`query_agent`)
+### 1. Policy Query Agent (`agents/query.py`)
+
 The user-facing orchestrator that handles incoming user questions from the frontend.
 
 **Model:** Amazon Nova Lite (`apac.amazon.nova-lite-v1:0`).
 
 **Responsibilities:**
 - Receives policy questions via `POST /query`.
-- Coordinates with the Search Agent to retrieve fresh, scraped data from both official and unofficial sources.
+- Coordinates with the search stack to retrieve fresh, scraped data from both official and unofficial sources.
 - Analyzes and filters retrieved content, placing strict priority on official government sources for rules, eligibility, figures, and deadlines.
 - Formulates a direct, concise response (1-2 sentence core answer + 2-4 key bullet points + official source citations).
+- Runs as an agentic loop using `bedrock.converse_with_tools` with the `search_policy` tool spec from `services/search_service.get_search_policy_tool_spec`.
 
-### 2. Search Agent (`search_agent`)
-The data retrieval and live web intelligence agent.
+### 2. Main Agent Orchestrator (`agents/main_agent.py`)
 
-**Model:** Amazon Nova Lite (`apac.amazon.nova-lite-v1:0`).
+Builds a `MainAgentPlan` (intent, target, topic, time_scope,
+agents_to_invoke, search_queries) used to route between digest, chat, and
+search flows.
+
+### 3. Search Stack (`agents/search.py` + `services/webscraper.py`)
+
+The data retrieval and live web intelligence layer.
+
+**Model:** Amazon Nova Lite (`apac.amazon.nova-lite-v1:0`) for synthesis.
 
 **Responsibilities:**
 - Web scraping across **official government sources** (`.gov.sg`, `cpf.gov.sg`, `hdb.gov.sg`, `iras.gov.sg`, `mom.gov.sg`, `moh.gov.sg`, `sprs.parl.gov.sg`, etc.) and **unofficial sources** (Reddit Singapore, HardwareZone, public forums).
 - Categorizes scraped content into `official_sources` (`is_official=True`) and `unofficial_sources` (`is_official=False`).
+- Ranks sources by authority → applicability → relevance → recency; detects conflicts between older and newer official figures.
 - Synthesizes findings into a structured search summary separating official policy facts from community sentiment.
-- Returns structured results to the Query Agent via `gather_and_search()`.
+- Entry point: `gather_and_search()`; called via `services.search_service.fetch_from_search_agent` (which also supports a `SEARCH_AGENT_URL` HTTP fallback for split-service topologies).
+
+### 4. Translation + Flashcards
+
+- `services/translation.py::translate_to_english` uses Nova + MERaLiON to
+  normalize incoming Chinese/Malay/Tamil/Singlish questions before the
+  Query Agent runs.
+- `agents/flashcards.py` generates flashcards from digest content on
+  demand.
 
 ---
 

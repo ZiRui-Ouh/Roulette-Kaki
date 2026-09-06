@@ -56,7 +56,7 @@ USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/151.0.0.0 Safari/537.36 "
-    "RouletteKaki-BlogPost/0.1 (hackathon)"
+    "RouletteKaki/0.1 (hackathon)"
 )
 
 log = logging.getLogger(__name__)
@@ -178,8 +178,26 @@ def list_topics(date: str) -> list[dict]:
         # items between actual-received-count and PAGE_SIZE.
         start += len(page)
 
-    log.info("SPRS list_topics(%s) → %d topics", date, len(all_items))
-    return all_items
+    # Dedup by topic_id. SPRS pagination has been observed to return
+    # overlapping pages, which downstream causes React key collisions
+    # on the frontend (list stops updating on filter input).
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for item in all_items:
+        tid = item.get("topic_id") or ""
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        deduped.append(item)
+    if len(deduped) != len(all_items):
+        log.warning(
+            "SPRS list_topics(%s): dropped %d duplicate topic_id(s)",
+            date,
+            len(all_items) - len(deduped),
+        )
+
+    log.info("SPRS list_topics(%s) → %d topics", date, len(deduped))
+    return deduped
 
 
 def _normalize_topic(raw: dict, date: str) -> dict:  # noqa: ARG001 — date reserved for future variants

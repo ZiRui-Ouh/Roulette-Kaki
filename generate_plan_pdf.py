@@ -346,11 +346,11 @@ def build_pdf(filename):
     story.append(Paragraph("5. Verification &amp; Validation Plan", h1_style))
     
     verif_items = [
-        "<b>Frontend Build &amp; Typecheck:</b> Executed <code>npm run build</code> in <code>query_agent/frontend</code> with zero TypeScript or JSX bundling errors.",
+        "<b>Frontend Build &amp; Typecheck:</b> Executed <code>npm run build</code> in <code>application/frontend</code> with zero TypeScript or JSX bundling errors.",
         "<b>Navigation &amp; Routing Verification:</b> Verified routes <code>/</code>, <code>/policy/:id</code>, <code>/debates</code>, and <code>/query</code> resolve smoothly with correct breadcrumbs and page titles.",
         "<b>Embedded Query Agent Interaction:</b> Validated that clicking a policy loads the executive brief and quick-ask chips, and queries to <code>POST /query</code> return structured, cited responses.",
         "<b>Accuracy &amp; Hallucination Testing:</b> Conducted live queries against HDB income ceilings, CPF retirement sums, and maternity leave rules to ensure strict adherence to official figures.",
-        "<b>Backend Integration &amp; Proxying:</b> Verified that Vite proxy routes <code>/api/debates/*</code> and <code>/debates/*</code> to the BlogPost service (port 8001) while <code>/query</code> routes to the QueryAgent service (port 8000)."
+        "<b>Backend Integration:</b> Verified that all feature routes (<code>/debates/*</code>, <code>/query</code>, <code>/translate</code>, <code>/transcribe</code>) share a single FastAPI service under <code>application/backend</code> on port 8000."
     ]
     for item in verif_items:
         story.append(Paragraph(f"&bull; {item}", bullet_style))

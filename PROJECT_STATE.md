@@ -1,108 +1,58 @@
 # Project state — Roulette-Kaki
 
-Last updated: 2026-08-31 (Phase 5.1 complete — feed auto-discovers sittings from YouTube playlist)
+Last updated: 2026-09-06 (Cleanup + backend consolidation complete —
+`BlogPost/`, `Chatbot/`, `Translation/`, `search_agent/` deleted;
+`query_agent/` renamed to `application/`; search stack merged into
+`application/backend/`. Next up: AWS migration + Terraform.)
 
 Single source of truth for what's built, what's next, and what's blocked.
 
 ---
 
-## Features
+## Repository layout
 
-| Feature | Status | Notes |
-|---|---|---|
-| BlogPost — Parliament Debate Digest | **Phase 5.1 complete — feed now discovers sittings automatically.** New `services/sittings.py` reads a YouTube playlist Atom feed (`YOUTUBE_PLAYLIST` env var), dedupes multi-language versions per date (English preferred, unicodedata-based heuristic). New `GET /sittings?limit=&offset=` endpoint. Frontend feed uses it with a "Load more" button. RSS caps at 15 items ≈ 3-4 unique sittings; API v3 upgrade deferred to 5.2. Phase 6 (Lambda + S3/CloudFront deploy) is next. | See `ARCHITECTURE.md`, `AGENTS.md`, `scripts/README.md`, `BlogPost/frontend/`. |
-| Chatbot                              | Not started — stub directories only  | `Chatbot/backend`, `Chatbot/frontend` exist but are empty. |
-| Translation                          | Not started — empty stub file        | `Translation/main.py` is empty. |
+| Folder | Purpose |
+|---|---|
+| [`application/backend`](application/backend) | FastAPI service — Query Agent + Parliament Debate Digest + web-search stack + translation + flashcards. Single Lambda deploy target. |
+| [`application/frontend`](application/frontend) | React 19 + Vite 8 + Tailwind 4 SPA. Chat UI, sitting feed, digest/chat, policy article view, flashcard drawer, i18n. |
+| [`terraform`](terraform) | Terraform module for AWS resources (`DebateDigests` + `ChatSessions` DDB tables, `parl-debate-cache` S3 bucket, Lambda + CloudFront next). |
+| [`scripts`](scripts) | Batch helpers, notably `prepopulate_digests.py` for warming the DDB cache before demo day. |
+| [`scratch`](scratch) | One-off debugging scripts (`trace_opinion_query.py`) — not part of the deploy. |
 
 ---
 
-## BlogPost — implementation phases
+## Features (unified backend)
 
-Each phase is demoable on its own. Phase 3.5 (real SPRS scraper) and
-Phase 4 (research agent) are next.
+| Feature | Status | Notes |
+|---|---|---|
+| Policy Query Agent (`POST /query`) | **Live.** Agentic loop over official + community sources, grounded Nova Lite answer, source citation, no cross-category number bleed. | See `AGENTS.md` § Query Agent. |
+| Parliament Debate Digest (`GET /debates/{date}`) | **Live.** Cache-check DDB → fixture/SPRS topics → Nova Lite summarize → cached JSON. 404 on no sitting. | See `AGENTS.md` § Digest. |
+| Debate Chat (`POST /debates/{date}/chat`) | **Live.** Nova Pro with attached report documents, prompt-cached, TTL-1h sessions. Web-fallback when ungrounded. | See `AGENTS.md` § Research/Chat. |
+| Sitting Feed (`GET /sittings`) | **Live.** YouTube Data API v3 `playlistItems.list` → sitting cards. Curated fallback if API key missing. | Multi-language dedup keeps English preferred. |
+| Web-Search Stack (`agents/search.py` + `services/webscraper.py`) | **Live.** Consolidated from former `search_agent/`. In-process `gather_and_search`; retains `SEARCH_AGENT_URL` HTTP fallback for future split. | Ranks official > community, extracts dates + applicability, detects conflicts. |
+| Translation (`POST /translate`) | **Live.** Nova + MERaLiON for English/Chinese/Malay/Tamil/Singlish. `TranslatedInput` preserves markdown + key points. | Consolidated from former `Translation/` folder. |
+| Audio Transcription (`POST /transcribe`) | **Live.** MERaLiON ASR for Singlish/audio. | |
+| Flashcards | **Live.** Generate flashcards from digest content. | `agents/flashcards.py`. |
 
-- [x] **Phase 0** — Original design captured in `Blog_Summary.txt` (kept for
-      reference).
-- [x] **Phase 1 — Docs (budget-revised plan).** `ARCHITECTURE.md`,
-      `AGENTS.md`, `PROJECT_STATE.md`, `BlogPost/CLAUDE.md` populated;
-      region typo in `BlogPost/backend/main.py` fixed.
-- [x] **Phase 2 — Backend skeleton.** FastAPI app with three endpoints
-      (stub responses). `services/bedrock.py` wraps Nova Converse and
-      enforces the 5-topic / 50K-token caps + `cachePoint` block.
-      `services/storage.py` wraps DDB + S3 lazily (TTL enforced on
-      `put_session`). `services/scraper.py`, `agents/digest.py`,
-      `agents/research.py` are stubs pointing at Phase 3 / Phase 4.
-      `lambda_handler.py` wraps the app in Mangum for later deploy.
-      Uvicorn smoke-test verified locally on 2026-08-30. **Full backend
-      state, layout, runbook, and API surface lives in
-      [`BlogPost/backend/README.md`](BlogPost/backend/README.md).**
-- [x] **Phase 3 — Digest agent + Terraform infra (fixture-first).**
-      `services/scraper.py::list_topics` is fixture-backed (reads
-      `backend/fixtures/topics_{date}.json`). `agents/digest.py::run_digest`
-      is fully implemented: cache check → topic scrape → Nova Lite
-      summarize → JSON parse (drops fabricated `topic_id`s) → DDB write.
-      `services/storage.py` gains `USE_LOCAL_STUBS=1` short-circuit for
-      local dev without AWS creds. `main.py::get_debate` returns real
-      digests with an HTTP 404 for no-sitting dates. Terraform module at
-      `terraform/` defines `DebateDigests`, `ChatSessions` (TTL on `ttl`),
-      and `parl-debate-cache` bucket with public access blocked.
-- [🚧] **Phase 3.5 — Real SPRS scraper.** Split across two turns because
-      the scraper can't be written blind.
-      - [x] **3.5a — Recorder + scaffolding.** Playwright recorder,
-        batch pre-populate script, docs.
-      - [x] **3.5b — Real SPRS scraper.** `services/scraper_sprs.py`
-        talks to SPRS via pure httpx (no runtime Playwright needed —
-        the API is clean JSON). Two endpoints in use:
-        `POST /search/searchResult` (paginated topic list with maxResult
-        gate + advance-by-actual-page-size) and
-        `POST /search/getHansardTopic` (per-topic HTML transcript,
-        wrapped in a minimal HTML envelope for Nova's `document`
-        blocks). `services/scraper.py` dispatches on `SCRAPER_MODE`.
-        Sanity-tested against 3 mocked pagination scenarios
-        (server-capped small pages, full-page, empty). Rate-limited
-        with `SPRS_REQUEST_DELAY` (0.5s default) + one retry on 429/5xx.
-      - [ ] **3.5c — Real showcase digests in DDB.** Run
-        `scripts/prepopulate_digests.py --dates <5-10 recent sittings>
-        --config` with `SCRAPER_MODE=sprs` against real AWS. Not blocking
-        Phase 4; a demo-prep task.
-- [x] **Phase 4 — Research agent with document blocks.**
-      `agents/research.py::run_chat` implements the full flow: load/create
-      session → validate `topic_id` against digest → S3 cache hit or
-      lazy-scrape → build Nova `document` blocks → Nova Pro Converse
-      with docs+cachePoint at **message 0** for cache-stable prefix
-      across turns → parse `<grounded>false</grounded>` marker →
-      persist chat_history + TTL refresh. `main.py::chat` returns
-      HTTP 400 on missing digest and 503 in fixture mode (no report
-      bytes). `bedrock.py::chat_with_documents` refactored to place
-      docs at message 0 (was: current turn). 7 in-sandbox tests cover
-      first turn, follow-up cache-stable prefix, no-topic guardrail
-      (no Bedrock call), fabricated topic_id, 5-topic cap, grounded
-      marker parse+strip, missing-digest ValueError.
-- [x] **Phase 5 — Frontend.** Vite + React + TypeScript + Tailwind scaffold
-      under `BlogPost/frontend/`. Two pages (feed + detail), 6 components,
-      plain-fetch API client, localStorage session persistence keyed by
-      date, `react-markdown` for chat replies. Backend added
-      `storage.list_digests()` (DDB Scan).
-- [x] **Phase 5.1 — YouTube-driven feed.** New `services/sittings.py`
-      fetches a playlist Atom feed
-      (`https://www.youtube.com/feeds/videos.xml?playlist_id=<ID>`),
-      dedupes multi-language versions per date (English preferred via
-      `unicodedata` Latin-alphabet check), TTL-cached 10 min. New
-      `GET /sittings?limit=5&offset=0` endpoint (with 400 on bad
-      pagination, 503 when `YOUTUBE_PLAYLIST` env var is unset).
-      Frontend feed page swapped from `GET /debates` to `GET /sittings`,
-      with a "Load more" button and a "set the env var" empty state.
-      Trade-off documented: RSS caps at ~15 items ≈ 3-4 unique sittings
-      after dedup. Phase 5.2 can swap in YouTube Data API v3 for full
-      pagination without changing the interface.
-- [ ] **Phase 6 — Package + deploy.** Dockerfile on Lambda Python base image,
-      deploy to Lambda Function URL. Frontend to S3 + CloudFront.
+---
+
+## Implementation phases
+
+- [x] **Phase 0-3** — Original design, backend skeleton, digest agent + Terraform infra (fixture-first).
+- [x] **Phase 3.5** — Real SPRS scraper (httpx, no runtime Playwright). Rate-limited with `SPRS_REQUEST_DELAY` + one retry on 429/5xx.
+- [ ] **Phase 3.5c** — Real showcase digests in DDB (`scripts/prepopulate_digests.py --dates ...` with `SCRAPER_MODE=sprs`). Demo-prep task, not a blocker.
+- [x] **Phase 4** — Research agent with document blocks. Nova Pro Converse with docs+cachePoint at message 0 for cache-stable prefix.
+- [x] **Phase 5** — Frontend scaffold (Vite + React + TypeScript + Tailwind), feed + detail pages, localStorage session persistence.
+- [x] **Phase 5.1** — YouTube-driven feed with English-preferred dedup.
+- [x] **Phase 5.2** — YouTube Data API v3 for full pagination.
+- [x] **Phase 5.5** — Backend consolidation. Merged `BlogPost/backend/` and `search_agent/backend/` into `application/backend/`. Reconciled `bedrock.py` (query_agent superset kept), replaced importlib bridges with direct imports, moved 2825-line `webscraper.py` and 382-line `agents/search.py` in place. Deleted `BlogPost/`, `Chatbot/`, `Translation/`, `search_agent/`. Renamed `query_agent/` → `application/`. `application/frontend/src/session.ts` retains the `query_agent:messages` localStorage key for user-history compatibility.
+- [ ] **Phase 6 — AWS migration.** Dockerfile on Lambda Python base image, deploy to Lambda Function URL. Frontend to S3 + CloudFront. Terraform module extended with Lambda + CloudFront resources.
 
 ---
 
 ## Key decisions locked in
 
-- **LLM:** Amazon Nova Lite (digest) and Nova Pro (chat) via Bedrock in
+- **LLM:** Amazon Nova Lite (digest / query) and Nova Pro (chat) via Bedrock in
   `ap-southeast-1`. See `ARCHITECTURE.md` for cost math.
 - **Embeddings:** none — deleted from the design. Documents are attached to
   Nova Converse calls as `document` blocks with prompt caching.
@@ -118,12 +68,12 @@ Phase 4 (research agent) are next.
 ## Running the backend locally
 
 Two modes. Full runbook and env-var reference live in
-[`BlogPost/backend/README.md`](BlogPost/backend/README.md).
+[`application/backend/README.md`](application/backend/README.md).
 
 **Local, no AWS (fastest for iteration):**
 
 ```bash
-cd BlogPost/backend
+cd application/backend
 ../../.venv/bin/pip install -r requirements.txt
 export USE_LOCAL_STUBS=1 SCRAPER_MODE=fixture AWS_REGION=ap-southeast-1
 ../../.venv/bin/python -m uvicorn main:app --reload --port 8000
@@ -136,7 +86,7 @@ Bedrock access), but DDB/S3 are stubbed. ~$0.001 per digest.
 
 ```bash
 cd terraform && terraform init && terraform apply    # one-time
-cd ../BlogPost/backend
+cd ../application/backend
 export AWS_REGION=ap-southeast-1  # unset USE_LOCAL_STUBS
 ../../.venv/bin/python -m uvicorn main:app --reload --port 8000
 ```
@@ -148,15 +98,11 @@ DDB (~2s). Second call hits the DDB cache (~50ms).
 
 ## Open questions to resolve during implementation
 
-- ~~Does SPRS expose a plain JSON API?~~ **Answered 2026-08-30:** No
-  discoverable REST endpoints via URL guessing — SPA hides the API.
-  Phase 3.5 needs an instrumented Playwright run to capture the real
-  API traffic before we decide `httpx` vs. Playwright for production.
 - What format does SPRS serve reports in — PDF, HTML, both? Determines the
   file extension on the S3 cache key and whether we need any format
-  massaging before handing to Nova. Resolves during Phase 3.5.
+  massaging before handing to Nova. Resolves during 3.5c.
 - Nova Pro's document-block behavior on very long PDFs (>50 pages) —
-  confirm quality is acceptable before Phase 4 signoff, otherwise fall back
+  confirm quality is acceptable before Phase 6 signoff, otherwise fall back
   to Nova Lite pre-summarization per topic.
 
 ---
@@ -164,6 +110,5 @@ DDB (~2s). Second call hits the DDB cache (~50ms).
 ## Non-goals for the hackathon
 
 - Multi-user auth. Sessions are anonymous UUIDs.
-- Cross-language support (Malay / Chinese / Tamil reports). English only.
 - Historical backfill of the SPRS archive. Purely lazy on user click.
 - A persistent vector index. Explicitly ruled out — see `ARCHITECTURE.md`.

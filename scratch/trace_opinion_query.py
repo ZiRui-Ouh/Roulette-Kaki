@@ -7,7 +7,10 @@ os.environ["ROUTER_MODE"] = "llm"
 os.environ["USE_LOCAL_STUBS"] = "1"
 
 # Add paths
-sys.path.insert(0, "/Users/jhmacbook/Roulette-Kaki/query_agent/backend")
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "application" / "backend"))
 
 from agents.main_agent import create_search_plan
 from services.search_service import fetch_from_search_agent, execute_search_policy
