@@ -1,215 +1,222 @@
-# Architecture — Roulette-Kaki
+# Architecture - Roulette-Kaki
 
-Roulette-Kaki was built for the SimplifyNext / Agentic AI Hackathon. All
-features — Parliament Debate Digest, Policy Query Agent, search stack,
-translation, flashcards — ship in one FastAPI service under
-[`application/backend/`](application/backend/) and one React SPA under
-[`application/frontend/`](application/frontend/). The pre-consolidation
-folders `BlogPost/`, `Chatbot/`, `Translation/`, and `search_agent/` no
-longer exist.
+Roulette-Kaki is a Singapore policy and parliamentary intelligence product.
+The active application is a single FastAPI backend in
+[`application/backend/`](application/backend/) and a React 19 + Vite SPA in
+[`application/frontend/`](application/frontend/). The top-level `BlogPost/`,
+`query_agent/`, and `search_agent/` directories are retained repository
+artifacts; the consolidated `application/` tree is the runtime source of
+truth.
 
-The single hard constraint that shapes every decision: **$30 total spend
-across all AWS services and LLM calls for the full hackathon.** If a design
-choice makes cost proportional to corpus size instead of user interaction
-volume, it's wrong.
+The backend combines four user-facing capabilities in one service:
+
+- Policy questions grounded in current official and community web sources.
+- Parliament sitting discovery, digest generation, and Hansard research chat.
+- Text and speech translation across English, Chinese, Malay, Tamil, and
+  Singlish.
+- Flashcard generation from a debate topic or a research-chat response.
 
 ---
+
+## System Shape
+
+The browser talks to the same FastAPI application for all product features.
+In local development Vite serves the SPA and the backend serves API routes.
+When `SERVE_STATIC=1`, the backend serves the built SPA from `static/` and
+mounts the API router under `/api`; otherwise the historical bare API paths
+remain available. `application/backend/main.py` owns route registration,
+CORS, translation wrapping, and the boundary between agents and HTTP.
+
+```text
+React SPA (Vite)
+  |  /query, /sittings, /debates, /translate, /transcribe, /flashcards
+  v
+FastAPI + Mangum-compatible backend
+  |-- Policy Query Agent -> search service -> official/community web sources
+  |-- Digest Agent -------> fixture or SPRS scraper -> DynamoDB digest cache
+  |-- Research Agent -----> S3 report cache + Bedrock document blocks
+  |-- Translation --------> Bedrock text translation or MERaLiON audio API
+  |-- Flashcards ----------> Bedrock generation from digest/chat context
+  |
+  `-- services/bedrock.py, storage.py, scraper*.py, webscraper.py
+```
+
+All Bedrock calls go through `services/bedrock.py`. Storage access is
+centralized in `services/storage.py`; agents do not create their own AWS
+clients. Local defaults set `USE_LOCAL_STUBS=1` and `SCRAPER_MODE=fixture` so
+the service can run without AWS or live SPRS access.
+
+## Model Tiers
+
+The model IDs below are the defaults in the active implementation. The Nova
+Lite ID can be overridden with `BEDROCK_MODEL_ID`; the Nova Pro ID is fixed in
+the shared Bedrock service.
+
+| Workload | Model and default ID | Implementation |
+|---|---|---|
+| Policy Query Agent, search synthesis, digest summaries, text translation, and fallback generation | Amazon Nova Lite - `amazon.nova-lite-v1:0` | `bedrock.ask_nova`, `bedrock.converse_with_tools`, and `bedrock.summarize` |
+| Hansard research chat and research tool loop | Amazon Nova Pro - `amazon.nova-pro-v1:0` | `bedrock.chat_with_documents`, `bedrock.chat_with_tools`, and `agents/research.py` |
+| Browser speech-to-text and speech translation | MERaLiON - configurable, default `MERaLiON/MERaLiON-3-10B` | `services/meralion.py`, called only for audio paths |
+| Embeddings | None | Reports are attached as Bedrock `document` blocks; there is no vector index or embedding service |
+
+Bedrock is configured from `BEDROCK_REGION` or `AWS_REGION`, defaulting to
+`us-east-1` in the service code. The Terraform default region is also
+`us-east-1`. Model selection is centralized so new calls inherit the same
+region, local simulation, document limits, and usage logging behavior.
+
+## Policy Query Agent and Search
+
+`POST /query` is handled by `agents/query.py`. The flow is:
+
+1. Translate a non-English text question to English with Nova Lite and retain
+   key points from the translation.
+2. Build a search plan with the main agent and call the `search_policy` tool
+   through the Nova Lite Converse tool loop.
+3. Retrieve and rank sources through `services/search_service.py`,
+   `agents/search.py`, and `services/webscraper.py`.
+4. Prefer current applicable official sources (`.gov.sg` and official
+   statutory-board domains) for policy rules, figures, eligibility, and dates.
+   Community sources are supplementary sentiment and opinion evidence.
+5. Verify category boundaries and synthesize a concise answer with official
+   citations. A session ID may be supplied to preserve query context.
+
+The search service runs in-process. `SEARCH_AGENT_URL` remains an optional
+HTTP fallback for a future split deployment, but it is not required by the
+current application.
 
 ## Parliament Debate Digest
 
-A blog-style feed where each post represents one Singapore Parliament sitting
-day. Users can drill into a date, see an AI-generated digest of what was
-debated, and chat with a research agent grounded in the actual report text.
+The digest flow is a sitting feed backed by YouTube metadata and a per-date
+digest cache.
 
-### Data flow at a glance
+```text
+GET /sittings
+  -> services/sittings.py -> YouTube Data API v3 or curated fallback
 
-```
-┌──────────┐   GET /debates          ┌──────────────────────────┐
-│ Frontend │────────────────────────>│ Lambda (FastAPI+Mangum)  │
-│  React   │<──── blog feed ─────────│  behind Function URL     │
-└──────────┘                         └──────────────────────────┘
-      │                                   │           │
-      │ GET /debates/{date}               │           │
-      ▼                                   ▼           ▼
-┌──────────────┐          ┌────────────────────┐  ┌────────────┐
-│ Digest agent │─miss────>│ SPRS scraper       │  │ DynamoDB   │
-│ (Nova Lite)  │          │ (JSON API first)   │  │ Digests    │
-└──────────────┘          └────────────────────┘  └────────────┘
-      │                          │                     ▲
-      │ hit                      ▼                     │
-      └─────────────────>┌────────────────┐            │
-                        │ S3 raw report  │───────────>─┘
-                        │ cache (PDF/HTML)│
-                        └────────────────┘
-                                 ▲
-                                 │ POST /debates/{date}/chat
-                                 │
-                        ┌────────────────┐    ┌──────────────┐
-                        │ Research agent │───>│ DynamoDB     │
-                        │ (Nova Pro +    │    │ Sessions     │
-                        │  document blocks)   │ (TTL=1h)     │
-                        └────────────────┘    └──────────────┘
+GET /debates/{date}
+  -> DynamoDB DebateDigests cache
+  -> list_topics() from fixture data or SPRS searchResult API on a miss
+  -> Nova Lite summary
+  -> cached digest response
+
+POST /debates/{date}/chat
+  -> ChatSessions state
+  -> lazy S3 report lookup/fetch for selected topics
+  -> Nova Pro research loop with attached documents
 ```
 
-### Model tier
+`services/scraper.py` selects fixture or SPRS mode. The SPRS implementation
+uses HTTP requests and pagination, then fetches a report body lazily through
+`getHansardTopic` only when research chat needs it. Raw HTML/report bytes are
+shared in S3 under `{date}/{topic_id}.{ext}` so the same topic is not scraped
+again for every session.
 
-| Job | Model | Bedrock ID | Price (in / out per 1M tok) |
-|---|---|---|---|
-| Digest summarization | Amazon Nova Lite | `apac.amazon.nova-lite-v1:0` | $0.06 / $0.24 |
-| Chat / research | Amazon Nova Pro   | `apac.amazon.nova-pro-v1:0`  | $0.80 / $3.20 |
-| Embeddings        | **none — deleted from design** | — | $0 |
+The digest agent writes a `DebateDigests` item containing the sitting metadata,
+summary, category breakdown, interesting topics, and topic metadata. A missing
+sitting returns an error and does not create a digest row.
 
-Region: `ap-southeast-1`. Default to Nova Lite; only escalate to Nova Pro
-when a concrete quality problem is observed on Nova Lite.
+## Hansard Research Agent
 
-### Why no embeddings tier
+The research agent is document-grounded rather than embedding-based. A chat
+request can explicitly provide a valid `topic_id`; selected topics are loaded
+into the anonymous session and their cached reports are attached to the
+Converse request as native Bedrock document blocks.
 
-The obvious way to do RAG over parliamentary reports is chunk → embed →
-cosine retrieve. We are not doing that. Nova's Converse API accepts
-`document` content blocks (PDF / HTML / DOCX / MD / TXT) natively, with a
-300K-token context window. So the research agent works by:
+- Documents and the cache point are placed in message 0 so the prompt-cache
+  prefix stays stable across turns.
+- The agent returns `reply`, `topics_used`, and a `grounded` flag. Ungrounded
+  policy-shaped questions can use the route-layer web fallback, controlled by
+  `ENABLE_WEB_FALLBACK`.
+- An empty session does not call Bedrock; the user is asked to select a topic.
+- `services/bedrock.py` caps the active research context at five topic
+  documents and approximately 50,000 document tokens, dropping the oldest
+  topic when necessary. This is a context-management rule, not a separate
+  session pricing model.
+- The research tool loop is bounded at three iterations in `research.py`.
 
-1. Caching the raw report bytes in S3 keyed `{date}/{topic_id}.{ext}` —
-   populated **lazily** by the research agent on first mention of a
-   topic (not proactively at digest time).
-2. On each chat turn, attaching the documents the session has "loaded" as
-   `document` blocks in the Converse call.
-3. Enabling Bedrock prompt caching on those blocks so turns 2..N in the same
-   session skip re-billing the document bodies.
+`ChatSessions` has a one-hour DynamoDB TTL refreshed centrally by
+`storage.put_session` on every write. The browser separately persists the
+visible debate conversation in language-specific localStorage buckets.
 
-This deletes an entire subsystem (chunker + embedder + storage +
-retrieval), keeps the Lambda image tiny (~100MB, no `torch`), and
-eliminates retrieval-miss failure modes — the model sees the full document.
+## Frontend
 
-### Session cost bounds
+The SPA starts in `main.tsx`, wraps the router in `LanguageProvider`, and
+keeps a shared news header/footer shell in `App.tsx`. The active routes are:
 
-Per-turn cost is bounded by total loaded-document size. Enforce in
-`services/bedrock.py`:
+| Route | Page and behavior |
+|---|---|
+| `/` | Local policy news feed from `data/policies.ts`, with category filters, search, a lead story, trending links, and links into policy chat or Hansard |
+| `/policy/:id` | Policy article and executive briefing with an article-scoped Policy Query Agent conversation, Markdown answers, reset/share controls, and voice input |
+| `/query` | General Policy Query Agent chat with suggested questions, loading/error states, clear-history control, and per-language local history |
+| `/debates` | Paginated sitting archive from `GET /sittings`, including latest-sitting spotlight, YouTube watch links/thumbnails, loading states, and configuration/error states |
+| `/debates/:date` | Digest summary, interesting topics, topic list, YouTube watch card, sticky Hansard Research Agent chat, and flashcard drawer |
 
-- Cap `topics_loaded` at 5 per session, **or**
-- Cap accumulated document tokens at 50K per session (drop-oldest above that).
+The catch-all route redirects to `/`. `api.ts` centralizes request decoding
+and error handling, with `VITE_QUERY_API_URL`, `VITE_BLOGPOST_API_URL`, and
+`VITE_API_URL` overrides and same-origin `/api` defaults.
 
-Sanity math (Nova Pro, one 3K-token topic loaded):
+Frontend state and interactions include:
 
-| State                          | Cost / turn |
-|--------------------------------|-------------|
-| First turn (cache miss)        | ~$0.006     |
-| Follow-up (doc cache hit)      | ~$0.002     |
-| 5 topics loaded, cache miss    | ~$0.015     |
-| 5 topics loaded, cache hit     | ~$0.004     |
+- A language switcher for English, Chinese, Malay, Tamil, and Singlish. The
+  selected language is stored as `roulette-kaki:lang`.
+- Policy and debate chats send language information to the backend. Query
+  history is stored per language; debate sessions and saved flashcard decks
+  are stored per sitting and language.
+- Debate topic selection is explicit. The research response controls the
+  loaded-topic list shown in the chat panel, including a notice when a topic
+  is not retained after the context cap.
+- Voice input records browser audio and sends it to `POST /transcribe`, which
+  uses MERaLiON and cleans speaker tags before returning text.
+- Flashcards can be generated from a selected topic or a research-chat reply,
+  then saved and deleted in browser storage.
 
-At 1,000 demo chat turns, projected LLM spend is well under $10 of the $30
-budget. Everything non-LLM sits inside AWS's permanent free tier at
-hackathon volume.
+The frontend is built with React, TypeScript, React Router, Tailwind CSS,
+React Markdown, and Lucide icons. The Dockerfile builds the SPA with Node 20
+and copies the result into a Python 3.12 runtime image for same-origin
+serving.
 
-### Storage
+## Translation and Audio
 
-- **DynamoDB `DebateDigests`** (PK `date`, no TTL). Cached digest per sitting.
-  ```
-  { date, title, youtube_url, summary, topic_count,
-    category_breakdown, interesting_topics,
-    topics: [{ topic_id, title, speakers, source_url, s3_key }, ...],
-    scraped_at }
-  ```
+Text translation stays on the shared Nova Lite path. The translation wrapper
+short-circuits English, translates non-English text to English before agent
+routing, and translates answers back while preserving Markdown where
+possible.
 
-- **DynamoDB `ChatSessions`** (PK `session_id`, TTL enabled, ~1h, refreshed
-  on each message). Shrunk vs. the original plan — no chunks, no embeddings:
-  ```
-  { session_id, date, topics_loaded: [topic_id, ...],
-    chat_history: [{ role, content, timestamp }, ...],
-    created_at, ttl }
-  ```
+Audio is deliberately separate: `services/meralion.py` calls MERaLiON's
+`/audio/transcriptions` and `/audio/translations` endpoints with the configured
+API key and model. The backend exposes `POST /transcribe` and
+`POST /translate/audio`; ordinary text translation does not create a second
+LLM client.
 
-- **S3 bucket `parl-debate-cache`** — raw report bytes keyed
-  `{date}/{topic_id}.{pdf|html}`. Shared across sessions. This is the tier
-  that stops us re-scraping SPRS for the same topic twice.
+## Storage
 
-### Compute
+- **DynamoDB `DebateDigests`**: per-date digest cache, no TTL.
+- **DynamoDB `ChatSessions`**: anonymous research sessions keyed by
+  `session_id`, with TTL enabled and refreshed for one hour after each write.
+- **S3 report cache**: raw SPRS report bytes keyed by date and topic. The
+  default application bucket is `parl-debate-cache-v2` and can be overridden
+  with `CACHE_BUCKET`.
+- **Browser localStorage**: selected language, query history, debate chat
+  display state, and saved flashcard decks. This is separate from server-side
+  research-session state.
 
-- **Primary: Lambda container image.** Python 3.11 base
-  (`public.ecr.aws/lambda/python:3.11`) + FastAPI + Mangum + `httpx` +
-  `boto3`. Exposed via a **Lambda Function URL** — no API Gateway.
-- **Fallback: ECS Fargate task** running the same image if Lambda's 15-min
-  hard limit becomes an issue (e.g. first-scrape of an unusually large
-  sitting) or if we want an always-warm endpoint for the demo.
+Terraform currently provisions the two DynamoDB tables and the S3 cache
+bucket. It does not yet provision Lambda, CloudFront, or an ECS service.
 
-### Scraping
+## Deployment and Boundaries
 
-SPRS (https://sprs.parl.gov.sg/search/#/home) is an Angular SPA with hash
-routing. Two-tier approach:
+The repository's current container path is:
 
-1. **First choice:** sniff the browser's Network tab, find the JSON API, hit
-   it with `httpx`. Cheap and reliable.
-2. **Fallback only:** Playwright inside the Lambda container image (or a
-   Fargate task). Add only if the JSON approach fails.
+1. Build the frontend with `npm ci` and `npm run build`.
+2. Copy the built `dist/` into the Python 3.12 runtime image.
+3. Run Uvicorn with `SERVE_STATIC=1` so the FastAPI app serves both SPA and
+   `/api` routes from one origin.
 
-Rate-limit, descriptive User-Agent, respect `robots.txt`. Not costly to
-be a good citizen because each `(date, topic)` scrapes exactly once thanks
-to the S3 cache.
+`lambda_handler.py` keeps a Mangum adapter for a Lambda-compatible runtime,
+but the current Dockerfile command is Uvicorn. `docker-compose.yml` supports
+local container orchestration. The `deploy/` scripts bootstrap Terraform
+state; the AWS application resources remain a separate, unfinished migration
+step.
 
-### API contracts
-
-- `GET /debates` — paginated blog feed.
-- `GET /debates/{date}` — full digest for one date. Cache-through: runs
-  digest agent on miss; returns `{ error: "no_sitting" }` if none held.
-- `POST /debates/{date}/chat` — body `{ session_id, message, topic_id? }`;
-  response `{ session_id, reply, topics_used, grounded }`. `grounded: false`
-  means retrieval / the attached documents don't contain the answer, so
-  don't trust the reply.
-
-### Frontend
-
-Vite + React, static-built, hosted on S3 + CloudFront (free tier). Two
-views:
-
-1. **Feed** — one card per sitting date: YouTube livestream embed + title.
-2. **Detail** — full digest + chat panel. Chat panel has a topic dropdown
-   sourced from the digest's `topics` list so the user tells us which report
-   to attach (avoids an extra LLM classifier round-trip).
-
----
-
-## Policy Query Agent + Search Stack
-
-See [`AGENTS.md`](AGENTS.md) for full agent contracts. Data flow:
-
-```
-┌──────────┐   POST /query           ┌──────────────────────────┐
-│ Frontend │────────────────────────>│ Lambda (FastAPI+Mangum)  │
-│  React   │<──── grounded answer ───│  behind Function URL     │
-└──────────┘                         └──────────────────────────┘
-                                          │
-                                          ▼
-                                   ┌──────────────────┐
-                                   │ agents/query.py  │
-                                   │ (agentic loop,   │
-                                   │  Nova Lite tools)│
-                                   └──────────────────┘
-                                          │  search_policy tool call
-                                          ▼
-                                   ┌──────────────────────────────┐
-                                   │ services/search_service.py   │
-                                   │   → agents/search.py         │
-                                   │   → services/webscraper.py   │
-                                   │      (rank, verify, dedupe)  │
-                                   └──────────────────────────────┘
-                                          │
-                                          ▼
-                                   Official .gov.sg + community forums
-```
-
-The Policy Query Agent runs on Nova Lite (`converse_with_tools`), the
-search stack synthesizes with the same model, and results feed the final
-grounded answer with strict category separation (Singles vs Families,
-BTO vs Resale, current vs historical).
-
-## Translation + Flashcards
-
-- `services/translation.py::translate_to_english` normalizes incoming
-  Chinese/Malay/Tamil/Singlish questions to English before Query Agent
-  routing. Uses Nova Lite plus MERaLiON for Singlish/audio.
-- `services/meralion.py` provides ASR for the `POST /transcribe` route.
-- `agents/flashcards.py` generates study flashcards from digest content.
-
-All three sit inside the same FastAPI app — no separate deploys, no
-cross-service network hops.
+There is no authentication layer. Policy-query and research sessions use
+anonymous IDs, and a persistent vector index is intentionally out of scope.
