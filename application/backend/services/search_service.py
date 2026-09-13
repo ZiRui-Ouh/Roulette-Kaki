@@ -283,6 +283,7 @@ def evaluate_evidence_sufficiency(
 def execute_search_policy(
     tool_input: dict,
     conversation_context: list[dict] | None = None,
+    plan_override: Any | None = None,
 ) -> dict:
     """
     Execute search_policy tool: calls the Search Agent, runs verification,
@@ -291,37 +292,56 @@ def execute_search_policy(
     from schemas import MainAgentPlan, SearchQueries
     from services.verification import verify_evidence
 
-    question = tool_input.get("question", "")
-    target = tool_input.get("target", "general")
-    topic = tool_input.get("topic", "Singapore Policy")
-    fact_type = tool_input.get("fact_type", "general")
-    time_scope = tool_input.get("time_scope", "current")
-    need_official = tool_input.get("need_official", True)
-    need_community = tool_input.get("need_community", False)
-    official_queries = tool_input.get("official_queries", [])
-    community_queries = tool_input.get("community_queries", [])
+    if isinstance(tool_input, str):
+        tool_input = {"question": tool_input}
 
-    # Map tool input into a MainAgentPlan for compatibility with existing verification
-    intent = "eligibility" if fact_type == "income_ceiling" else ("public_opinion" if fact_type == "public_opinion" else "policy_fact")
-    agents_to_invoke = []
-    if need_official:
-        agents_to_invoke.append("official_search")
-    if need_community:
-        agents_to_invoke.append("community_search")
-    agents_to_invoke.append("verification")
+    if plan_override and isinstance(plan_override, MainAgentPlan):
+        plan = plan_override
+        raw_q = tool_input.get("question") or ""
+        if plan.resolved_query and ("Regarding the Singapore policy" in raw_q or not raw_q):
+            question = plan.resolved_query
+        else:
+            question = raw_q or plan.resolved_query or ""
+        target = plan.target
+        topic = plan.topic
+        fact_type = tool_input.get("fact_type", "income_ceiling" if plan.intent == "eligibility" else ("public_opinion" if plan.intent in ("public_opinion", "user_experience", "pros_cons") else ("claim_limit" if "claim" in question.lower() else "general")))
+        time_scope = plan.time_scope
+        need_official = "official_search" in plan.agents_to_invoke
+        need_community = "community_search" in plan.agents_to_invoke
+        official_queries = tool_input.get("official_queries") or plan.search_queries.official
+        community_queries = tool_input.get("community_queries") or plan.search_queries.community
+    else:
+        question = tool_input.get("question", "")
+        target = tool_input.get("target", "general")
+        topic = tool_input.get("topic", "Singapore Policy")
+        fact_type = tool_input.get("fact_type", "general")
+        time_scope = tool_input.get("time_scope", "current")
+        need_official = tool_input.get("need_official", True)
+        need_community = tool_input.get("need_community", False)
+        official_queries = tool_input.get("official_queries", [])
+        community_queries = tool_input.get("community_queries", [])
 
-    plan = MainAgentPlan(
-        intent=intent,
-        topic=topic,
-        target=target,
-        location="Singapore",
-        time_scope=time_scope,
-        is_follow_up=bool(conversation_context),
-        resolved_query=question,
-        agents_to_invoke=agents_to_invoke,
-        search_queries=SearchQueries(official=official_queries, community=community_queries),
-        reasoning_summary=f"search_policy tool execution for {topic} ({target})",
-    )
+        # Map tool input into a MainAgentPlan for compatibility with existing verification
+        intent = "eligibility" if fact_type == "income_ceiling" else ("public_opinion" if fact_type == "public_opinion" else "policy_fact")
+        agents_to_invoke = []
+        if need_official:
+            agents_to_invoke.append("official_search")
+        if need_community:
+            agents_to_invoke.append("community_search")
+        agents_to_invoke.append("verification")
+
+        plan = MainAgentPlan(
+            intent=intent,
+            topic=topic,
+            target=target,
+            location="Singapore",
+            time_scope=time_scope,
+            is_follow_up=bool(conversation_context),
+            resolved_query=question,
+            agents_to_invoke=agents_to_invoke,
+            search_queries=SearchQueries(official=official_queries, community=community_queries),
+            reasoning_summary=f"search_policy tool execution for {topic} ({target})",
+        )
 
     # 1. Dispatch search
     search_result = fetch_from_search_agent(

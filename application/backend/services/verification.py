@@ -389,6 +389,37 @@ def filter_facts_by_target(facts: List[PolicyFact], target: str) -> List[PolicyF
     return facts
 
 
+def extract_source_release_date(source: dict) -> Tuple[str, int]:
+    """
+    Extract the date of release (published date, last updated, announcement date, or effective date)
+    and parse the year for recency evaluation.
+    Returns (formatted_date_string, year_integer).
+    """
+    for field in ["published_date", "publication_date", "last_updated", "announcement_date", "effective_date", "payment_date"]:
+        val = source.get(field)
+        if val and isinstance(val, str) and val.strip() and val.strip().lower() not in ("not specified", "none", "unknown"):
+            m = re.search(r"\b(202[0-9]|201[0-9])\b", val)
+            if m:
+                return val.strip(), int(m.group(1))
+            return val.strip(), 2020
+
+    url = source.get("url", "")
+    url_m = re.search(r"/(202[0-9])/", url)
+    if url_m:
+        return f"Year {url_m.group(1)}", int(url_m.group(1))
+
+    content = source.get("content") or source.get("text") or ""
+    date_match = re.search(r"\b(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(202[0-9]))\b", content, re.I)
+    if date_match:
+        return date_match.group(1), int(date_match.group(2))
+
+    year_match = re.search(r"\b(202[4-6])\b", content[:1000])
+    if year_match:
+        return f"Year {year_match.group(1)}", int(year_match.group(1))
+
+    return "Not specified", 2020
+
+
 def verify_evidence(
     official_sources: List[Dict[str, Any]],
     unofficial_sources: List[Dict[str, Any]],
@@ -400,6 +431,7 @@ def verify_evidence(
     Core verification entrypoint:
     - Filters and ranks official sources
     - Extracts and partitions current vs historical facts
+    - Verifies date of release and confirms if official source is most recently updated
     - Selects primary applicable source
     - Detects conflicts/superseded data
     - Structures community insights
@@ -446,11 +478,12 @@ def verify_evidence(
                 "subsequent_value": cf.value,
             })
 
-    # 4. Select Primary Source (Section 39 & 40: Do not set official source as primary for opinion intent)
+    # 4. Select Primary Source & Recency Verification
+    # (Methodology: Check date of release of official sources cited and if it is most recently updated)
     primary_source = None
     is_opinion = plan.intent in ("public_opinion", "user_experience", "pros_cons")
     if verified_official and not is_opinion:
-        # Score sources based on target keyword match
+        # Score sources based on target keyword match AND release date / recency
         def _score_source(s: dict) -> int:
             score = 0
             title = (s.get("title") or "").lower()
@@ -471,10 +504,28 @@ def verify_evidence(
                     score += 8
                 if "single" in excerpt:
                     score += 5
+
+            # Date of release & recency evaluation
+            rel_date, year = extract_source_release_date(s)
+            s["release_date"] = rel_date
+            s["release_year"] = year
+            if year >= 2026:
+                score += 15
+            elif year == 2025:
+                score += 10
+            elif year == 2024:
+                score += 5
+
             return score
 
         sorted_official = sorted(verified_official, key=_score_source, reverse=True)
         primary_source = sorted_official[0]
+
+        # Tag primary source with verified release date and recency status
+        prim_date, prim_year = extract_source_release_date(primary_source)
+        primary_source["release_date"] = prim_date
+        max_year = max((extract_source_release_date(s)[1] for s in verified_official), default=2020)
+        primary_source["is_most_recently_updated"] = (prim_year >= max_year)
 
         # Attach relevant excerpt from verified facts if not present
         active_fact_list = historical_facts if plan.time_scope == "historical" else current_facts
@@ -496,6 +547,12 @@ def verify_evidence(
         f"Time scope applied: {plan.time_scope}.",
         f"Target demographic: {plan.target}.",
     ]
+    if primary_source:
+        rel_info = primary_source.get("release_date", "Not specified")
+        is_latest = primary_source.get("is_most_recently_updated", True)
+        summary_parts.append(
+            f"Release date of cited official source verified: {rel_info} (most recently updated: {is_latest})."
+        )
     if plan.time_scope == "historical":
         summary_parts.append(
             f"Verified historical policy facts ({len(historical_facts)} found). Primary historical figure: "

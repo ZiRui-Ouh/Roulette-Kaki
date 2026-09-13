@@ -100,6 +100,8 @@ UNOFFICIAL_DOMAINS = [
     "reddit.com",
     "hardwarezone.com.sg",
     "facebook.com",
+    "instagram.com",
+    "mothership.sg",
 ]
 
 
@@ -408,6 +410,20 @@ COMMUNITY_SEED_PORTALS: dict[str, list[dict]] = {
                 "- Calls for prioritizing first-timer couples who have faced consecutive ballot rejections."
             ),
         },
+        {
+            "url": "https://mothership.sg/2026/02/bto-waiting-times-reactions-singaporeans/",
+            "title": "What young Singaporeans are saying about BTO waiting times and housing affordability | Mothership.sg",
+            "category": "hdb",
+            "domain": "mothership.sg",
+            "is_official": False,
+            "source_type": "Unofficial Community Source",
+            "default_summary": (
+                "Mothership Public Reaction & Community Sentiment on BTO:\n"
+                "- Young Singaporeans voice frustration over 4-5 year construction waits impacting marriage and family planning.\n"
+                "- Mixed views on Prime and Plus flat restrictions (10-year MOP and subsidy clawbacks) versus lower starting prices.\n"
+                "- General sentiment acknowledges government grants (EHG) help affordability, but ballot fatigue remains a major talking point."
+            ),
+        },
     ],
     "bto_couples": [
         {
@@ -688,40 +704,52 @@ def classify_intent(query: str, conversation_context: list[dict] | None = None) 
 
     q_lower = query.lower().strip()
 
+    # Extract actual ask if wrapped in contextual preamble like 'Regarding the Singapore policy "...": <ask>'
+    actual_ask = q_lower
+    colon_match = re.search(r":\s*([^:]+)$", q_lower)
+    if colon_match and len(colon_match.group(1).strip()) > 3:
+        actual_ask = colon_match.group(1).strip()
+
     # 1. Follow-up detection
     if is_followup_query(query):
         return "FOLLOW_UP"
 
-    # 2. Pros and Cons
-    if re.search(r"\b(pros\s+and\s+cons|pros\s+&\s+cons|advantages\s+and\s+disadvantages|good\s+and\s+bad|trade-?offs|drawbacks\s+and\s+benefits)\b", q_lower):
+    # 2. Specific factual policy parameters (claim limits, rates, ceilings) override opinion keywords
+    if re.search(r"\b(claim\s+limits?|annual\s+claim\s+limit|annual\s+limit|inpatient\s+claim|icu\s+claim|coverage\s+limits?|claim\s+caps?|deductibles?)\b", actual_ask):
+        return "FACTUAL_POLICY"
+
+    # 3. Pros and Cons
+    if re.search(r"\b(pros\s+and\s+cons|pros\s+&\s+cons|advantages\s+and\s+disadvantages|good\s+and\s+bad|trade-?offs|drawbacks\s+and\s+benefits)\b", actual_ask):
         return "PROS_CONS"
 
-    # 3. Comparison
-    if re.search(r"\b(or\s+resale\s+better|or\s+bto\s+better|better\s+or\s+worse|compared\s+(with|to)|comparison\s+between|difference\s+between\s+.+\s+and\s+|versus|\bvs\b|\bv\.s\b|is\s+\w+\s+or\s+\w+\s+better)\b", q_lower):
+    # 4. Comparison
+    if re.search(r"\b(or\s+resale\s+better|or\s+bto\s+better|better\s+or\s+worse|compared\s+(with|to)|comparison\s+between|difference\s+between\s+.+\s+and\s+|versus|\bvs\b|\bv\.s\b|is\s+\w+\s+or\s+\w+\s+better)\b", actual_ask):
         return "COMPARISON"
 
-    # 4. User Experience (waiting times, personal experiences)
-    if re.search(r"\b(how\s+long\s+(do|are)\s+people|waiting\s+times?|experiences?|what\s+is\s+it\s+like|personal\s+stories|reviews?|applying\s+experience|buying\s+experience|how\s+was\s+your|people's\s+experiences?)\b", q_lower):
+    # 5. User Experience (waiting times, personal experiences, user reviews)
+    if re.search(r"\b(how\s+long\s+(do|are)\s+people|waiting\s+times?|what\s+is\s+it\s+like|personal\s+stories|user\s+reviews?|customer\s+reviews?|personal\s+reviews?|reviews?\s+(on|about|of)\s+the\s+experience|what\s+are\s+the\s+reviews|applying\s+experience|buying\s+experience|how\s+was\s+your|people's\s+experiences?)\b", actual_ask) or (
+        re.search(r"\bexperiences?\b", actual_ask) and not re.search(r"\b(policy|limit|ceiling|payout|rate|rule|date|deadline|income|grant|medishield)\b", actual_ask)
+    ):
         return "USER_EXPERIENCE"
 
-    # 5. Public Opinion & Community Sentiment
-    if re.search(r"\b(opinions?|what\s+do\s+people\s+think|what\s+people\s+think|sentiments?|thoughts\s+on|how\s+do\s+people\s+feel|public\s+view|public\s+opinion|feedback\s+on|reactions?\s+to|what\s+are\s+singaporeans\s+saying|what\s+are\s+people\s+saying|is\s+[\w\s-]+\s+worth\s+it|worth\s+it|what\s+do\s+reddit\s+users\s+think|reddit\s+users?\s+think|community\s+opinions?|community\s+sentiment|public\s+discussion)\b", q_lower):
+    # 6. Public Opinion & Community Sentiment
+    if re.search(r"\b(opinions?|what\s+do\s+people\s+think|what\s+people\s+think|sentiments?|thoughts\s+on|how\s+do\s+people\s+feel|public\s+view|public\s+opinion|feedback\s+on|reactions?\s+to|what\s+are\s+singaporeans\s+saying|what\s+are\s+people\s+saying|is\s+[\w\s-]+\s+worth\s+it|worth\s+it|what\s+do\s+reddit\s+users\s+think|reddit\s+users?\s+think|community\s+opinions?|community\s+sentiment|public\s+discussion)\b", actual_ask):
         return "PUBLIC_OPINION"
 
-    # 6. Eligibility & Criteria
-    if re.search(r"\b(income\s+ceiling|income\s+limit|who\s+can\s+apply|eligibility|eligible|qualify|requirements|criteria|age\s+limit|can\s+(singles|couples|pr|citizens?)\s+buy|can\s+i\s+apply|minimum\s+occupation\s+period|mop\b)", q_lower):
+    # 7. Eligibility & Criteria
+    if re.search(r"\b(income\s+ceiling|income\s+limit|who\s+can\s+apply|eligibility|eligible|qualify|requirements|criteria|age\s+limit|can\s+(singles|couples|pr|citizens?)\s+buy|can\s+i\s+apply|minimum\s+occupation\s+period|mop\b)", actual_ask):
         return "ELIGIBILITY"
 
-    # 7. Financial & Payouts
-    if re.search(r"\b(how\s+much\s+(is|are|will)|payout\s+amount|quantum|grant\s+amount|subsidy\s+amount|cash\s+relief|cost-of-living\s+payout|col\s+payout|voucher\s+amount|payment\s+amount)\b", q_lower):
+    # 8. Financial & Payouts
+    if re.search(r"\b(how\s+much\s+(is|are|will)|payout\s+amount|quantum|grant\s+amount|subsidy\s+amount|cash\s+relief|cost-of-living\s+payout|col\s+payout|voucher\s+amount|payment\s+amount)\b", actual_ask):
         return "FINANCIAL"
 
-    # 8. Deadline & Dates
-    if re.search(r"\b(deadline|closing\s+date|due\s+date|last\s+day\s+to\s+apply|when\s+does\s+it\s+close|when\s+to\s+apply\s+by|application\s+period|application\s+close|applications\s+close)\b", q_lower):
+    # 9. Deadline & Dates
+    if re.search(r"\b(deadline|closing\s+date|due\s+date|last\s+day\s+to\s+apply|when\s+does\s+it\s+close|when\s+to\s+apply\s+by|application\s+period|application\s+close|applications\s+close)\b", actual_ask):
         return "DEADLINE"
 
-    # 9. Factual Policy
-    if re.search(r"\b(interest\s+rate|what\s+is\s+happening\s+to|effective\s+date|what\s+is\s+the\s+policy|rules?\s+for|closure\s+of|how\s+does\s+.+\s+work)\b", q_lower):
+    # 10. Factual Policy
+    if re.search(r"\b(interest\s+rate|what\s+is\s+happening\s+to|effective\s+date|what\s+is\s+the\s+policy|rules?\s+for|closure\s+of|how\s+does\s+.+\s+work|annual\s+claim\s+limit|new\s+annual\s+claim\s+limit|claim\s+limit|what\s+is\s+the\s+new)\b", actual_ask):
         return "FACTUAL_POLICY"
 
     # Fallback to general information
@@ -2705,7 +2733,11 @@ def build_search_intelligence(
     is_opinion = intent.get("is_opinion_or_sentiment", False) or intent.get("resolved_intent") in ("PUBLIC_OPINION", "USER_EXPERIENCE", "PROS_CONS")
 
     # If pure opinion inquiry without explicit request for official facts, don't scrape official pages
-    actual_include_official = include_official and not (is_opinion and not any(k in effective_query.lower() for k in ["ceiling", "income ceiling", "grant", "payout", "eligibility", "rule"]))
+    has_factual_anchor = any(k in effective_query.lower() for k in [
+        "ceiling", "income ceiling", "grant", "payout", "eligibility", "rule", "limit",
+        "claim", "medishield", "cpf", "interest", "rate", "allowance", "leave", "coe", "psle", "cost"
+    ])
+    actual_include_official = include_official and not (is_opinion and not has_factual_anchor)
 
     official_sources: list[dict] = []
     unofficial_sources: list[dict] = []

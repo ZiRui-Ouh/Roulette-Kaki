@@ -282,7 +282,12 @@ def gather_and_search(
         rewritten_query = intel.get("rewritten_query", question)
         debug_trace = intel.get("debug_trace")
 
-    is_opinion = query_intent in ("PUBLIC_OPINION", "USER_EXPERIENCE", "PROS_CONS")
+    plan_intent = plan_dict.get("intent") if plan_dict else None
+    if plan_intent in ("policy_fact", "eligibility") or (need_official and not need_community):
+        is_opinion = False
+    else:
+        is_opinion = query_intent in ("PUBLIC_OPINION", "USER_EXPERIENCE", "PROS_CONS")
+
     if not current_applicable and all_official and not is_opinion:
         current_applicable = all_official[0]
 

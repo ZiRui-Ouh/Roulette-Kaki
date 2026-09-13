@@ -578,14 +578,50 @@ def answer_question(
     official_facts: list[dict] = []
     answer = ""
 
-    if router_mode == "regex":
-        log.info("[ROUTER_MODE=regex] Running legacy deterministic flow")
+    # =========================================================================
+    # STEP 1: Main Agent — Already Determined Nature of Question
+    # =========================================================================
+    # Receives user inputs (from Chat Bot or speech-to-text via MERaLiON).
+    # Main Agent performs intent classification, contextual follow-up resolution,
+    # demographic targeting, and search query planning to produce the MainAgentPlan.
+    try:
         plan = create_search_plan(question, conversation_context=chat_history)
-        need_official = "official_search" in plan.agents_to_invoke
-        need_community = "community_search" in plan.agents_to_invoke
-        need_verification = "verification" in plan.agents_to_invoke
+        log.info(
+            "[MAIN AGENT] Determined nature of question: intent=%s, topic=%s, target=%s, time_scope=%s, resolved_query='%s'",
+            plan.intent,
+            plan.topic,
+            plan.target,
+            plan.time_scope,
+            plan.resolved_query,
+        )
+    except Exception as plan_err:
+        log.warning("[MAIN AGENT] Failed to create search plan: %s", plan_err)
+        from schemas import SearchQueries
+        plan = MainAgentPlan(
+            intent="policy_fact",
+            topic="Singapore Policy",
+            target="general",
+            location="Singapore",
+            time_scope="current",
+            is_follow_up=bool(chat_history),
+            resolved_query=question,
+            agents_to_invoke=["official_search", "verification"],
+            search_queries=SearchQueries(official=[question], community=[]),
+            reasoning_summary="Fallback plan",
+        )
 
+    # =========================================================================
+    # STEP 2 & 3: Query Orchestrator — Based on Main Agent Plan
+    # =========================================================================
+    need_official = "official_search" in plan.agents_to_invoke
+    need_community = "community_search" in plan.agents_to_invoke
+    need_verification = "verification" in plan.agents_to_invoke
+
+    if router_mode == "regex":
+        log.info("[ROUTER_MODE=regex] Running plan-driven deterministic flow")
         if enable_search:
+            # Search Agent: Webscrapes using DDG + LLM categorizations
+            # Dispatches Official Sources Scraper ('.gov' sites) and Unofficial Sources Scraper
             search_result = fetch_from_search_agent(
                 question=plan.resolved_query or question,
                 urls=urls,
@@ -608,6 +644,8 @@ def answer_question(
                 synth_data = new_synthesis
 
         if need_verification and (curated_official or curated_unofficial):
+            # Verification & Recency Agent: Checks date of release of official sources
+            # cited and verifies if it is the most recently updated.
             verification_result = verify_evidence(
                 official_sources=curated_official,
                 unofficial_sources=curated_unofficial,
@@ -626,6 +664,7 @@ def answer_question(
                     s for s in curated_official if s.get("url") != current_applicable.get("url")
                 ]
 
+        # Information related to Question in Text feeds back to Query Orchestrator
         prompt = build_prompt(
             question=plan.resolved_query or question,
             official_sources=curated_official,
@@ -642,7 +681,7 @@ def answer_question(
         answer = ask_nova(prompt, max_tokens=1024)
 
     else:
-        # ROUTER_MODE=llm or ROUTER_MODE=shadow (genuinely model-driven agentic loop)
+        # ROUTER_MODE=llm: Orchestrator manages the agentic Converse tool loop
         if router_mode == "shadow":
             try:
                 shadow_plan = create_search_plan(question, conversation_context=chat_history)
@@ -655,12 +694,12 @@ def answer_question(
             except Exception as shadow_err:
                 log.warning("[SHADOW MODE] Deterministic comparator failed: %s", shadow_err)
 
-        is_opinion_q = bool(
+        is_opinion_q = plan.intent in ("public_opinion", "user_experience", "pros_cons") or bool(
             re.search(
                 r"\b(opinions?|public\s+opinions?|what\s+do\s+people\s+think|what\s+people\s+think|sentiments?|thoughts\s+on|"
                 r"how\s+do\s+people\s+feel|public\s+view|feedback\s+on|reactions?\s+to|what\s+are\s+singaporeans\s+saying|"
                 r"what\s+are\s+people\s+saying|experiences?|is\s+[\w\s-]+\s+worth\s+it|worth\s+it|what\s+do\s+reddit\s+users\s+think|"
-                r"reddit|hardwarezone|pros\s+and\s+cons|trade-?offs)\b",
+                r"reddit|hardwarezone|mothership|pros\s+and\s+cons|trade-?offs)\b",
                 question.lower(),
             )
         )
@@ -674,6 +713,9 @@ def answer_question(
         active_system_prompt = OPINION_AGENT_PROMPT if is_opinion_q else QUERY_AGENT_PROMPT
 
         user_prompt = f"USER QUESTION: {question}\n"
+        if plan.resolved_query and plan.resolved_query != question:
+            user_prompt += f"RESOLVED QUERY (FROM MAIN AGENT PLAN): {plan.resolved_query}\n"
+        user_prompt += f"MAIN AGENT PLAN: Intent={plan.intent} | Target={plan.target} | Time Scope={plan.time_scope}\n"
         if chat_history:
             user_prompt += "CONVERSATION CONTEXT (PREVIOUS TURNS):\n"
             for turn in chat_history[-4:]:
@@ -723,7 +765,7 @@ def answer_question(
                     )
 
                     if tool_name == "search_policy" and enable_search:
-                        evidence = execute_search_policy(tool_input, conversation_context=chat_history)
+                        evidence = execute_search_policy(tool_input, conversation_context=chat_history, plan_override=plan)
                         last_evidence = evidence
                         is_sufficient = evidence.get("is_sufficient", True)
 
@@ -794,10 +836,19 @@ def answer_question(
             )
             answer = ask_nova(prompt, max_tokens=1024)
 
-    resolved_intent = plan.intent if router_mode == "regex" else (last_tool_input.get("fact_type") or ("public_opinion" if is_opinion_q else "policy_fact"))
-    resolved_q = plan.resolved_query if router_mode == "regex" else question
+    resolved_intent = (
+        last_tool_input.get("fact_type")
+        if (router_mode != "regex" and last_tool_input.get("fact_type"))
+        else plan.intent
+    )
+    resolved_q = plan.resolved_query or question
 
-    # STEP 5: Consistency Validation & Negation Prevention
+    # =========================================================================
+    # STEP 4: Query Orchestrator — Final Check & Consistency Validation (Red Function)
+    # =========================================================================
+    # Orchestrator does final check before formatting answer and returning to user.
+    # (*this red function is only executed after the completion of the agentic loop
+    # represented by the white arrows).
     contradiction = _validate_consistency(
         answer,
         curated_official,
