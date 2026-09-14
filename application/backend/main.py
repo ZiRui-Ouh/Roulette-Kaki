@@ -540,13 +540,16 @@ def chat_debate(date: str, req: ChatRequest) -> ChatResponse:
         captured["topics_used"] = r.topics_used
         captured["grounded"] = r.grounded
         reply = r.reply
+        grounded_final = r.grounded
 
         # Fallback: if Hansard didn't cover the question, try the Policy
         # Query Agent's orchestrator + Search Agent to answer from the web.
+        # run_chat no longer persists — we do it below AFTER this fallback
+        # so the DDB record matches the reply the user actually sees.
         if not r.grounded:
-            persisted = storage_service.get_session(session_id) or {}
-            # Drop the just-written turn so the plan sees prior context only.
-            prior_history = persisted.get("chat_history", [])[:-2]
+            # r.session is the live pre-persist session dict; its history
+            # is prior turns only (no current turn appended yet).
+            prior_history = (r.session or {}).get("chat_history", [])
             fb = _web_fallback_reply(
                 question=english_message,
                 hansard_reply=r.reply,
@@ -554,7 +557,24 @@ def chat_debate(date: str, req: ChatRequest) -> ChatResponse:
                 date=date,
             )
             if fb is not None:
-                reply, captured["grounded"] = fb
+                reply, grounded_final = fb
+                captured["grounded"] = grounded_final
+
+        # Persist ONE turn with the final reply the user will see.
+        # r.session is guaranteed non-None when the request came from a
+        # normal endpoint invocation of run_chat (added by the refactor).
+        if r.session is not None:
+            try:
+                research_agent.persist_turn(
+                    r.session, english_message, reply, grounded_final
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "chat_debate: persist_turn failed for session=%s (%s) — "
+                    "returning reply anyway",
+                    session_id,
+                    e,
+                )
 
         return reply
 

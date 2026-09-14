@@ -130,6 +130,72 @@ def put_session(session: dict) -> None:
     _ddb().Table(SESSIONS_TABLE).put_item(Item=session)
 
 
+def append_chat_turn(
+    *,
+    session_id: str,
+    date: str | None,
+    new_items: list[dict],
+    topics_loaded: list[str],
+    created_at: str | None = None,
+) -> None:
+    """Atomically append `new_items` to `chat_history` and refresh session
+    metadata + TTL.
+
+    Uses DynamoDB `UpdateItem` with `list_append` so overlapping requests
+    on the same `session_id` don't drop each other's turns — the failure
+    mode we can no longer tolerate now that persistence happens outside
+    the tool loop. `topics_loaded` and `date` are still last-writer-wins
+    because they're small and mostly monotonic; a lost topic add is
+    self-healing (the next fetch re-adds it), a lost chat turn is not.
+    """
+    ttl = int(time.time()) + SESSION_TTL_SECONDS
+
+    if is_stub_mode() or STUB_MODE:
+        session = _stub_sessions.get(session_id) or {
+            "session_id": session_id,
+            "date": date,
+            "chat_history": [],
+            "topics_loaded": [],
+            "created_at": created_at,
+        }
+        session["chat_history"] = [*session.get("chat_history", []), *new_items]
+        if topics_loaded is not None:
+            session["topics_loaded"] = topics_loaded
+        if date:
+            session["date"] = date
+        session["ttl"] = ttl
+        if created_at and not session.get("created_at"):
+            session["created_at"] = created_at
+        _stub_sessions[session_id] = session
+        return
+
+    expr_names = {"#d": "date", "#ttl": "ttl"}
+    expr_values: dict = {
+        ":empty": [],
+        ":new_items": new_items,
+        ":tl": topics_loaded or [],
+        ":ttl": ttl,
+    }
+    set_clauses = [
+        "chat_history = list_append(if_not_exists(chat_history, :empty), :new_items)",
+        "topics_loaded = :tl",
+        "#ttl = :ttl",
+    ]
+    if date:
+        expr_values[":date"] = date
+        set_clauses.append("#d = :date")
+    if created_at:
+        expr_values[":created_at"] = created_at
+        set_clauses.append("created_at = if_not_exists(created_at, :created_at)")
+
+    _ddb().Table(SESSIONS_TABLE).update_item(
+        Key={"session_id": session_id},
+        UpdateExpression="SET " + ", ".join(set_clauses),
+        ExpressionAttributeNames=expr_names,
+        ExpressionAttributeValues=expr_values,
+    )
+
+
 # --- Raw report cache --------------------------------------------------------
 
 def report_key(date: str, topic_id: str, ext: str) -> str:

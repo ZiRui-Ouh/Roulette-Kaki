@@ -298,16 +298,14 @@ class ResearchAgentToolUseTests(unittest.TestCase):
             "agents.research.storage.get_digest",
             return_value=_digest_with_topics(["t1", "t2", "t3", "t4", "t5", "t6"]),
         ).start()
-        # MAX_RESEARCH_ITERATIONS = 3 in the current loop. Feed 3 tool_use
-        # frames — one per iteration — using `search_sitting_topics` (a real
-        # tool that doesn't hit the topics_loaded cap). The loop exits the
-        # `for` without ever producing `text`, and the fallback synthesis
-        # path in run_chat generates the reply.
+        # MAX_RESEARCH_ITERATIONS = 5 now. Feed 5 tool_use frames so the
+        # loop exhausts iterations without ever producing a text reply,
+        # then the honest ungrounded fallback triggers.
         responses = [
             _tool_use_frame(
                 f"tu_{i}", "search_sitting_topics", {"query": f"t{i + 1}"}
             )
-            for i in range(3)
+            for i in range(5)
         ]
         client = self._install_client(responses)
 
@@ -317,16 +315,16 @@ class ResearchAgentToolUseTests(unittest.TestCase):
 
         # Exactly MAX_RESEARCH_ITERATIONS converse calls — the loop never
         # gets an end_turn stop reason.
-        self.assertEqual(len(client.calls), 3)
+        self.assertEqual(len(client.calls), 5)
         # Every call carries toolConfig — the message transcript contains
         # toolUse/toolResult blocks after the first iteration, and Bedrock
         # rejects those without a toolConfig on the request.
         for call in client.calls:
             self.assertIn("toolConfig", call)
-        # Reply is the fallback synthesis text produced by run_chat when
-        # the loop exhausts iterations without a final answer.
-        self.assertIn("According to the official Hansard", result.reply)
-        self.assertTrue(result.grounded)
+        # The reply is the honest ungrounded fallback (no more hallucinated
+        # "According to the official Hansard…" fabrication).
+        self.assertIn("couldn't produce a grounded answer", result.reply)
+        self.assertFalse(result.grounded)
 
     # 7 --------------------------------------------------------------
     @unittest.skip(

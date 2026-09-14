@@ -148,10 +148,58 @@ class ChatResult:
     topics_used: list[str]
     grounded: bool
     usage: dict
+    # Live session dict (mutated in-place by the tool loop). Exposed so
+    # the endpoint can persist AFTER the web-fallback decision is made,
+    # ensuring DDB records the final reply the user actually saw.
+    # Optional with a safe default so external tests that construct
+    # ChatResult by keyword don't have to pass it.
+    session: dict | None = None
+    # Set to True when the caller (main.chat_debate) has already persisted
+    # the turn with the post-fallback reply. Kept for observability only.
+    persisted: bool = False
 
 
 def _parse_grounded(reply: str) -> bool:
     return _GROUNDED_FALSE_RE.search(reply) is None
+
+
+# Questions that can legitimately be answered from the sitting overview
+# alone (no transcript fetch required). Keep this list conservative — if
+# a keyword falls outside this set, the grounding gate demands at least
+# one loaded topic before trusting a `<grounded>true</grounded>` marker.
+_META_QUESTION_KEYWORDS = (
+    "what topics",
+    "which topics",
+    "topics discussed",
+    "topics covered",
+    "topics were",
+    "list of topics",
+    "what was debated",
+    "what was discussed",
+    "what was covered",
+    "what were the",
+    "what bills",
+    "which bills",
+    "bills passed",
+    "overview",
+    "agenda",
+    "statements delivered",
+    "ministerial statements",
+    "whole sitting",
+    "entire sitting",
+    "summary of sitting",
+    "what did we discuss",
+    "what have we discussed",
+    "what did we discussed",
+    "what did we talk about",
+    "what have we been",
+    "so far",
+)
+
+
+def _is_meta_question(msg: str) -> bool:
+    m = (msg or "").lower()
+    return any(kw in m for kw in _META_QUESTION_KEYWORDS)
 
 
 def _strip_grounded_marker(reply: str) -> str:
@@ -180,9 +228,17 @@ def _persist_turn(
     assistant_reply: str,
     grounded: bool,
 ) -> None:
+    """Append a (user, assistant) turn pair to `session` and write it.
+
+    Prefers the atomic append path in `storage.append_chat_turn` (uses
+    DDB UpdateItem list_append) so overlapping requests on the same
+    session_id don't clobber each other. Falls back to `put_session`
+    (full replace) when the session hasn't been persisted before, when
+    stub storage is in use, or if the storage layer doesn't expose the
+    atomic helper.
+    """
     ts = datetime.now(timezone.utc).isoformat()
-    session["chat_history"] = [
-        *session.get("chat_history", []),
+    new_items = [
         {"role": "user", "content": user_message, "timestamp": ts},
         {
             "role": "assistant",
@@ -191,7 +247,41 @@ def _persist_turn(
             "grounded": grounded,
         },
     ]
+    # Keep the local dict in sync regardless of write path — callers may
+    # inspect it before returning to the client.
+    session["chat_history"] = [*session.get("chat_history", []), *new_items]
+
+    append_fn = getattr(storage, "append_chat_turn", None)
+    if callable(append_fn):
+        try:
+            append_fn(
+                session_id=session["session_id"],
+                date=session.get("date"),
+                new_items=new_items,
+                topics_loaded=session.get("topics_loaded", []),
+                created_at=session.get("created_at"),
+            )
+            return
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "atomic append_chat_turn failed (%s) — falling back to "
+                "full-replace put_session",
+                e,
+            )
     storage.put_session(session)  # refreshes TTL to now + 3600
+
+
+def persist_turn(
+    session: dict,
+    user_message: str,
+    assistant_reply: str,
+    grounded: bool,
+) -> None:
+    """Public wrapper for callers that need to persist AFTER post-processing
+    the reply (e.g. main.chat_debate applying the web-search fallback).
+    Kept as a thin alias so external modules don't reach into `_persist_turn`.
+    """
+    _persist_turn(session, user_message, assistant_reply, grounded)
 
 
 def _to_topic_meta(digest_topic: dict) -> TopicMeta:
@@ -427,7 +517,10 @@ def execute_fetch_topic_report(date: str, topic_id: str, digest: dict, session: 
         session["topics_loaded"] = loaded
         log.info("[TOOL EXEC] fetch_topic_report | session topics_loaded now: %s", loaded)
 
-    text_content = bytes_.decode("utf-8", errors="ignore")[:4000]
+    # 20k chars ≈ 5k tokens — well within Nova Pro's context and large enough
+    # that Hansard question-prefaces don't push the substantive debate off
+    # the end (root cause of the "MP question list" repeated answer pattern).
+    text_content = bytes_.decode("utf-8", errors="ignore")[:20000]
     is_sufficient = "could not be retrieved" not in text_content
     log.info(
         "[TOOL EXEC] fetch_topic_report | returning topic_id=%s cached=%s sufficient=%s content_length=%d",
@@ -506,7 +599,10 @@ def run_chat(
         log.info("[SESSION] pre-registered UI-hint topic_id=%s into topics_loaded", topic_id)
 
     # --- Bounded Agentic Loop ---
-    MAX_RESEARCH_ITERATIONS = 3
+    # Bumped 3→5: overview → search → fetch → answer already burns 3
+    # iterations; the tight cap made turn 1 fall through to the (removed)
+    # hallucinated fallback text.
+    MAX_RESEARCH_ITERATIONS = 5
     research_tools = get_research_tool_specs()
     log.info(
         "[LOOP CONFIG] max_iterations=%d | tools_available=%s | model=%s",
@@ -515,35 +611,64 @@ def run_chat(
         bedrock.MODEL_NOVA_PRO,
     )
 
-    user_prompt = f"USER RESEARCH QUESTION: {message}\nSitting Date: {date}\n"
+    # Build a NATIVE multi-turn Bedrock Converse `messages` array.
+    #
+    # Prior turns are rendered as real `{role: "user"|"assistant"}` entries
+    # rather than concatenated into one text blob. This gives Nova Pro
+    # proper turn boundaries so it stops confusing the trailing `USER:`
+    # line of a history string with "the current question" — the root
+    # cause of the off-by-one drift previously seen in DDB. The current
+    # turn's sitting metadata (date, currently-loaded topics) rides on
+    # the FINAL user message alongside the actual question.
+    messages: list[dict] = []
+
+    history = session.get("chat_history", [])
+    # Take the last N items (~3 full turns) and sanitize to a clean
+    # alternating sequence starting with `user` and ending with
+    # `assistant`. Any leading assistant or trailing unpaired user is
+    # dropped so we never emit an illegal Bedrock message layout.
+    history_window = list(history[-6:])
+    while history_window and history_window[0].get("role") != "user":
+        history_window.pop(0)
+    if history_window and history_window[-1].get("role") == "user":
+        history_window.pop()
+
+    for turn in history_window:
+        role = "user" if turn.get("role") == "user" else "assistant"
+        content_text = _strip_grounded_marker(turn.get("content", "")) or "(no content)"
+        messages.append({"role": role, "content": [{"text": content_text}]})
+
+    # Compose the CURRENT user turn: sitting-scoped context first, then
+    # the actual question. This block is the only place per-turn
+    # metadata lives; SYSTEM_PROMPT stays sitting-agnostic.
+    current_parts: list[str] = [f"Sitting Date: {date}"]
     if session.get("topics_loaded"):
-        # Emit id↔title pairs so the model can resolve references like
-        # "this topic" back to the correct opaque topic_id. Without the
-        # title, Nova Pro hallucinates a slugified topic_id from titles
-        # mentioned in prior turns.
         loaded_lines = [
             "Currently loaded topics in session (already cached — reuse these topic_ids for follow-ups):"
         ]
         for tid in session["topics_loaded"]:
             t_title = topic_meta_by_id.get(tid, {}).get("title") or "(title unavailable)"
             loaded_lines.append(f'  - topic_id="{tid}" title="{t_title}"')
-        user_prompt += "\n".join(loaded_lines) + "\n"
-    if session.get("chat_history"):
-        user_prompt += "Previous conversation history:\n"
-        for turn in session["chat_history"][-3:]:
-            user_prompt += f"{turn['role'].upper()}: {_strip_grounded_marker(turn['content'])}\n"
+        current_parts.append("\n".join(loaded_lines))
+    current_parts.append(f"Question: {message}")
+    current_user_text = "\n\n".join(current_parts)
+    messages.append({"role": "user", "content": [{"text": current_user_text}]})
 
     log.info(
-        "[PROMPT BUILT] length=%d chars | preview:\n---\n%s\n---",
-        len(user_prompt),
-        user_prompt if len(user_prompt) <= 1000 else user_prompt[:1000] + " …[truncated]",
+        "[PROMPT BUILT] messages=%d (history_turns=%d) | current_user_preview=%r",
+        len(messages),
+        len(history_window),
+        current_user_text[:400],
     )
-
-    messages = [{"role": "user", "content": [{"text": user_prompt}]}]
     reply_text = ""
     usage: dict = {}
     total_tool_calls = 0
     exit_reason = "max_iterations"
+    # Snapshot of what the model had access to when the turn started —
+    # used by the grounding gate below to decide whether the model could
+    # possibly have had transcript evidence.
+    topics_loaded_at_start = list(session.get("topics_loaded", []))
+    topic_fetches_this_turn = 0
 
     for iteration in range(MAX_RESEARCH_ITERATIONS):
         log.info(
@@ -570,6 +695,15 @@ def run_chat(
         )
 
         if resp.get("stop_reason") == "tool_use" and resp.get("tool_calls"):
+            # Append the assistant's tool_use turn ONCE (the model emits
+            # all tool_use blocks in a single assistant message even when
+            # it calls multiple tools), then a SINGLE user message with
+            # one toolResult block per call. This is the correct Bedrock
+            # alternating layout — the previous code appended the same
+            # assistant message N times and split results across N user
+            # messages, which broke strict-alternation models.
+            messages.append(resp["raw_message"])
+            tool_result_blocks: list[dict] = []
             for call in resp["tool_calls"]:
                 total_tool_calls += 1
                 tool_name = call["name"]
@@ -596,6 +730,8 @@ def run_chat(
                 elif tool_name == "fetch_topic_report":
                     tid = tool_input.get("topic_id") or topic_id or (digest.get("topics", [{}])[0].get("topic_id", "topic-1"))
                     tool_res = execute_fetch_topic_report(date, tid, digest, session)
+                    if tool_res.get("is_sufficient"):
+                        topic_fetches_this_turn += 1
                 else:
                     log.warning("[DISPATCH] unknown tool requested: %s", tool_name)
                     tool_res = {"error": f"Unknown tool {tool_name}"}
@@ -608,20 +744,14 @@ def run_chat(
                     str(tool_res)[:300],
                 )
 
-                # Append assistant toolUse and user toolResult
-                messages.append(resp["raw_message"])
-                messages.append({
-                    "role": "user",
-                    "content": [
-                        {
-                            "toolResult": {
-                                "toolUseId": call["id"],
-                                "content": [{"json": tool_res}],
-                                "status": "success",
-                            }
-                        }
-                    ],
+                tool_result_blocks.append({
+                    "toolResult": {
+                        "toolUseId": call["id"],
+                        "content": [{"json": tool_res}],
+                        "status": "success",
+                    }
                 })
+            messages.append({"role": "user", "content": tool_result_blocks})
             continue
 
         # Model finalized answer
@@ -641,20 +771,41 @@ def run_chat(
         )
 
     if not reply_text:
-        # Fallback to document synthesis if loop terminated without text
-        loaded_titles = [topic_meta_by_id.get(tid, {}).get("title", tid) for tid in session["topics_loaded"]]
+        # Honest ungrounded fallback. The previous version fabricated a
+        # Hansard-authoritative sentence and stamped <grounded>true</grounded>,
+        # which is exactly the hallucination pattern we're trying to prevent.
         log.warning(
-            "[FALLBACK] loop returned no reply_text — synthesising from loaded_titles=%s",
-            loaded_titles,
+            "[FALLBACK] loop returned no reply_text — returning explicit ungrounded reply"
         )
         reply_text = (
-            f"According to the official Hansard parliamentary debate records for '{', '.join(loaded_titles) or 'Parliament Sitting'}', "
-            f"the sitting on {date} debated the legislative measures regarding {message}.\n<grounded>true</grounded>"
+            "I couldn't produce a grounded answer from the sitting records this "
+            "turn — please retry or rephrase your question.\n<grounded>false</grounded>"
         )
 
     # Grounding detection and parsing
     grounded = _parse_grounded(reply_text)
     visible_reply = _strip_grounded_marker(reply_text)
+
+    # Programmatic grounding gate: the model self-marks confidently, so
+    # trust it only when there was actual evidence to ground on. If the
+    # model claims grounded=true but this turn fetched no transcripts AND
+    # no transcripts were carried in from earlier turns AND the question
+    # isn't a sitting-overview-only meta-question, force grounded=false so
+    # the web-fallback path in chat_debate can kick in.
+    if (
+        grounded
+        and topic_fetches_this_turn == 0
+        and not topics_loaded_at_start
+        and not _is_meta_question(message)
+    ):
+        log.warning(
+            "[GROUNDING GATE] model claimed grounded=true but no transcript "
+            "evidence was consulted (fetches=%d, preloaded=%s, meta=False) — "
+            "forcing grounded=false",
+            topic_fetches_this_turn,
+            topics_loaded_at_start,
+        )
+        grounded = False
 
     log.info(
         "\n==================================================\n"
@@ -671,12 +822,17 @@ def run_chat(
         visible_reply,
     )
 
-    # Persist turn (refreshes 1h TTL)
-    _persist_turn(session, message, visible_reply, grounded)
+    # NOTE: persistence has moved OUT of run_chat. The endpoint
+    # (main.chat_debate) is responsible for calling `persist_turn` after
+    # any post-processing (e.g. web-search fallback) so DDB records the
+    # final reply the user actually saw. When run_chat is called from
+    # tests or scripts that don't post-process, they should call
+    # `research.persist_turn(session, message, reply, grounded)` themselves
+    # if durability is required.
     log.info(
-        "[PERSIST] session %s written | chat_history_turns=%d | topics_loaded=%s",
+        "[PERSIST DEFERRED] returning to caller for post-processing | "
+        "session=%s pending_turns=user+assistant | topics_loaded=%s",
         session_id,
-        len(session.get("chat_history", [])),
         session.get("topics_loaded", []),
     )
 
@@ -685,4 +841,5 @@ def run_chat(
         topics_used=session.get("topics_loaded", []),
         grounded=grounded,
         usage=usage,
+        session=session,
     )
