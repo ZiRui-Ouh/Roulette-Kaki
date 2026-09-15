@@ -593,10 +593,44 @@ def run_chat(
         list(topic_meta_by_id.keys()),
     )
 
-    # Pre-register explicit topic_id if passed
-    if topic_id and topic_id in topic_meta_by_id and topic_id not in session["topics_loaded"]:
-        session["topics_loaded"] = [*session["topics_loaded"], topic_id]
-        log.info("[SESSION] pre-registered UI-hint topic_id=%s into topics_loaded", topic_id)
+    # Turn-scoped counter for the grounding gate. Declared here so the
+    # eager preload below can increment it before the loop starts.
+    topic_fetches_this_turn = 0
+
+    # Eager preload: when the UI has selected a topic to ground the chat
+    # (`req.topic_id`), fetch its transcript SYNCHRONOUSLY here and inline
+    # it into the current user message a few blocks down. Previously we
+    # only registered the id into `session["topics_loaded"]` as a hint,
+    # and the "already cached" phrasing in the current-user preamble made
+    # the model think the transcript was already in context — so it
+    # answered from the title alone and produced off-topic / ungrounded
+    # replies. The pre-registered id ALSO fooled the grounding gate
+    # (`topics_loaded_at_start` was non-empty) and let those replies
+    # slip through as grounded=true. Eager preload closes both holes.
+    preloaded_transcript: str | None = None
+    preloaded_topic_title: str | None = None
+    if topic_id and topic_id in topic_meta_by_id:
+        log.info(
+            "[UI-HINT] eagerly loading transcript for selected topic_id=%s",
+            topic_id,
+        )
+        preload_res = execute_fetch_topic_report(date, topic_id, digest, session)
+        if preload_res.get("is_sufficient"):
+            preloaded_transcript = preload_res.get("text") or ""
+            preloaded_topic_title = preload_res.get("title") or topic_id
+            topic_fetches_this_turn += 1
+        else:
+            log.warning(
+                "[UI-HINT] preload for %s returned insufficient — the "
+                "loop can still retry via fetch_topic_report",
+                topic_id,
+            )
+    elif topic_id:
+        log.warning(
+            "[UI-HINT] topic_id=%s not present in digest for date=%s — ignoring",
+            topic_id,
+            date,
+        )
 
     # --- Bounded Agentic Loop ---
     # Bumped 3→5: overview → search → fetch → answer already burns 3
@@ -639,17 +673,31 @@ def run_chat(
         messages.append({"role": role, "content": [{"text": content_text}]})
 
     # Compose the CURRENT user turn: sitting-scoped context first, then
-    # the actual question. This block is the only place per-turn
-    # metadata lives; SYSTEM_PROMPT stays sitting-agnostic.
+    # (if the UI selected a topic) the transcript INLINE, then the loaded
+    # topic index, then the question itself. This block is the only place
+    # per-turn metadata lives; SYSTEM_PROMPT stays sitting-agnostic.
     current_parts: list[str] = [f"Sitting Date: {date}"]
+
+    if preloaded_transcript:
+        current_parts.append(
+            "=== USER-SELECTED TOPIC (ground your answer in this transcript) ===\n"
+            f"topic_id: {topic_id}\n"
+            f"title: {preloaded_topic_title}\n\n"
+            f"{preloaded_transcript}\n"
+            "=== END OF USER-SELECTED TOPIC TRANSCRIPT ==="
+        )
+
     if session.get("topics_loaded"):
         loaded_lines = [
-            "Currently loaded topics in session (already cached — reuse these topic_ids for follow-ups):"
+            "Topic IDs available in this session (call fetch_topic_report to "
+            "re-load a transcript — S3 cache hit, cheap):"
         ]
         for tid in session["topics_loaded"]:
             t_title = topic_meta_by_id.get(tid, {}).get("title") or "(title unavailable)"
-            loaded_lines.append(f'  - topic_id="{tid}" title="{t_title}"')
+            marker = " (INLINED ABOVE)" if tid == topic_id and preloaded_transcript else ""
+            loaded_lines.append(f'  - topic_id="{tid}" title="{t_title}"{marker}')
         current_parts.append("\n".join(loaded_lines))
+
     current_parts.append(f"Question: {message}")
     current_user_text = "\n\n".join(current_parts)
     messages.append({"role": "user", "content": [{"text": current_user_text}]})
@@ -666,9 +714,11 @@ def run_chat(
     exit_reason = "max_iterations"
     # Snapshot of what the model had access to when the turn started —
     # used by the grounding gate below to decide whether the model could
-    # possibly have had transcript evidence.
+    # possibly have had transcript evidence. Captured AFTER any eager
+    # UI-hint preload so the preloaded topic counts as evidence.
     topics_loaded_at_start = list(session.get("topics_loaded", []))
-    topic_fetches_this_turn = 0
+    # Note: topic_fetches_this_turn was initialized above the preload and
+    # may already be > 0 if a UI-hint transcript was loaded. Do not reset.
 
     for iteration in range(MAX_RESEARCH_ITERATIONS):
         log.info(
