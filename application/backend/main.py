@@ -21,8 +21,16 @@ from typing import Literal, Optional
 # Set the default environment BEFORE importing services so `storage.py` and
 # friends read the intended values at import time. Clear these for real-AWS /
 # real-scraper mode.
+try:
+    import dotenv
+    dotenv.load_dotenv()
+except ImportError:
+    pass
+
 os.environ.setdefault("USE_LOCAL_STUBS", "1")
 os.environ.setdefault("SCRAPER_MODE", "fixture")
+os.environ.setdefault("YOUTUBE_API_KEY", "AIzaSyA5H8Oc3lEsLcoJkWnB1pXsRC4d_WDfo0U")
+os.environ.setdefault("MDDI_YOUTUBE_CHANNEL", "@SingaporeMDDI")
 os.environ.setdefault("YOUTUBE_PLAYLIST", "PLetiU3qG4uSrSjL6UlfVsgR89lxBzP5D1")
 
 # Cold-start SSM load — imported for its side effect: populates os.environ

@@ -4,7 +4,7 @@ import { listSittings } from "../api";
 import type { Sitting } from "../types";
 import DebateCard from "../components/DebateCard";
 import YoutubeThumbnail from "../components/YoutubeThumbnail";
-import { Video, RefreshCw, FileText, ArrowRight, ShieldCheck, Sparkles, Building2, AlertCircle, Play } from "lucide-react";
+import { Video, RefreshCw, FileText, ArrowRight, ShieldCheck, Sparkles, Building2, AlertCircle, Play, Layers } from "lucide-react";
 
 const PAGE_SIZE = 6;
 
@@ -154,7 +154,7 @@ export default function FeedPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3 text-xs text-stone-500 font-medium">
+          <div className="flex items-center gap-2.5 flex-wrap text-xs text-stone-500 font-medium">
             <span className="flex items-center gap-1 bg-stone-100 px-3 py-1.5 rounded-lg border border-stone-200">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
               <span>Verified SPRS Records</span>
@@ -163,6 +163,16 @@ export default function FeedPage() {
               <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
               <span>Nova AI Synthesis</span>
             </span>
+            <a
+              href="https://www.youtube.com/@SingaporeMDDI"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 px-3 py-1.5 rounded-lg border border-stone-200 text-stone-700 transition"
+              title="Official Ministry of Digital Development and Information YouTube Channel"
+            >
+              <Video className="w-3.5 h-3.5 text-red-600" />
+              <span>@SingaporeMDDI</span>
+            </a>
           </div>
         </div>
       </section>
@@ -290,6 +300,34 @@ export default function FeedPage() {
           )}
         </section>
       )}
+
+      {/* Featured Feature Callout: Policy Feed & Ministry Dispatches */}
+      <section className="bg-gradient-to-br from-stone-900 via-stone-900 to-indigo-950 text-white rounded-2xl p-6 sm:p-7 shadow-xs border border-stone-800 mt-12">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-400">
+              <Layers className="w-4 h-4" />
+              <span>Dedicated Feature &bull; Policy Feed &amp; Gazettes</span>
+            </div>
+            <h2 className="font-serif font-black text-xl sm:text-2xl text-white tracking-tight">
+              Singapore Policy Intelligence &amp; Policy Feed
+            </h2>
+            <p className="text-xs sm:text-sm text-stone-300 max-w-2xl leading-relaxed">
+              Looking for active housing income ceilings, MediShield claim caps, CPF Special Account updates, or SkillsFuture training allowances? Explore our interactive policy feed.
+            </p>
+          </div>
+
+          <div className="shrink-0 flex items-center gap-3">
+            <Link
+              to="/policies"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs sm:text-sm font-semibold transition shadow-xs"
+            >
+              <span>Explore Policy Feed</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

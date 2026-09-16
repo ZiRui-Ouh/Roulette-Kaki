@@ -70,7 +70,7 @@ export default function DetailPage() {
     return (
       <div className="py-6 space-y-4 max-w-2xl mx-auto">
         <Link
-          to="/debates"
+          to="/"
           className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium text-slate-500 hover:text-indigo-600 transition"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -101,7 +101,7 @@ export default function DetailPage() {
       {/* Top Breadcrumb & Metadata Navigation */}
       <div className="flex items-center justify-between pb-4 mb-6 border-b border-stone-200">
         <Link
-          to="/debates"
+          to="/"
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500 hover:text-stone-900 transition"
         >
           <ArrowLeft className="w-4 h-4" />

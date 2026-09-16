@@ -4,9 +4,10 @@ import {
   Flame,
   Search,
   MessageSquareText,
-  FileText,
   Clock,
   SlidersHorizontal,
+  Landmark,
+  Layers,
 } from "lucide-react";
 import { CATEGORIES } from "../data/policies";
 import type { PolicyCategory } from "../types";
@@ -28,9 +29,11 @@ export default function NewsHeader({
 }: NewsHeaderProps) {
   const location = useLocation();
   const [currentDateStr, setCurrentDateStr] = useState("");
-  const isArticleOrFeed =
-    location.pathname === "/" || location.pathname.startsWith("/policy");
-  const isDebates = location.pathname.startsWith("/debates");
+  const isPolicies =
+    location.pathname.startsWith("/policies") ||
+    location.pathname.startsWith("/policy");
+  const isDebates =
+    location.pathname === "/" || location.pathname.startsWith("/debates");
   const isOpenQuery = location.pathname.startsWith("/query");
 
   useEffect(() => {
@@ -111,36 +114,48 @@ export default function NewsHeader({
             </p>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap justify-center md:justify-end">
             <Link
-              to="/query"
-              className={`inline-flex items-center gap-2 px-4 py-5 rounded-lg text-sm font-semibold transition border ${
-                isOpenQuery
-                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
-                  : "bg-white text-stone-700 border-stone-300 hover:bg-stone-50 hover:text-stone-900"
-              }`}
-            >
-              <MessageSquareText className="w-4 h-4 text-indigo-500" />
-              <span>Ask Query Agent</span>
-            </Link>
-
-            <Link
-              to="/debates"
-              className={`inline-flex items-center gap-2 px-4 py-5 rounded-lg text-sm font-semibold transition border ${
+              to="/"
+              className={`inline-flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-sm font-semibold transition border ${
                 isDebates
                   ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
                   : "bg-white text-stone-700 border-stone-300 hover:bg-stone-50 hover:text-stone-900"
               }`}
             >
-              <FileText className="w-4 h-4 text-indigo-500" />
-              <span>Parliament Sittings</span>
+              <Landmark className={`w-4 h-4 ${isDebates ? "text-white" : "text-indigo-600"}`} />
+              <span>Parliament Debates</span>
+            </Link>
+
+            <Link
+              to="/policies"
+              className={`inline-flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-sm font-semibold transition border ${
+                isPolicies
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                  : "bg-white text-stone-700 border-stone-300 hover:bg-stone-50 hover:text-stone-900"
+              }`}
+            >
+              <Layers className={`w-4 h-4 ${isPolicies ? "text-white" : "text-indigo-600"}`} />
+              <span>Policy Feed</span>
+            </Link>
+
+            <Link
+              to="/query"
+              className={`inline-flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-sm font-semibold transition border ${
+                isOpenQuery
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                  : "bg-white text-stone-700 border-stone-300 hover:bg-stone-50 hover:text-stone-900"
+              }`}
+            >
+              <MessageSquareText className={`w-4 h-4 ${isOpenQuery ? "text-white" : "text-indigo-600"}`} />
+              <span>Ask Query Agent</span>
             </Link>
           </div>
         </div>
       </div>
 
       {/* Editorial Navigation & Categories Bar */}
-      {isArticleOrFeed && (
+      {isPolicies && (
         <div className="bg-stone-50/90 border-b border-stone-200">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 py-3">
             <nav className="flex items-center gap-1.5 overflow-x-auto py-1 scrollbar-none">

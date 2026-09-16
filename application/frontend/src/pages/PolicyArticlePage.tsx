@@ -141,11 +141,11 @@ export default function PolicyArticlePage() {
           The requested policy article could not be located in our gazette index.
         </p>
         <Link
-          to="/"
+          to="/policies"
           className="inline-flex items-center gap-2 px-4 py-2 bg-stone-900 text-white rounded-lg text-xs font-semibold hover:bg-stone-800 transition"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Return to Front Page</span>
+          <span>Return to Policy Feed</span>
         </Link>
       </div>
     );
@@ -165,11 +165,11 @@ export default function PolicyArticlePage() {
       {/* Breadcrumb & Navigation */}
       <div className="flex items-center justify-between gap-4 mb-6 pt-2 border-b border-stone-200/80 pb-3">
         <Link
-          to="/"
+          to="/policies"
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500 hover:text-stone-900 transition"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Front Page</span>
+          <span>Policy Feed</span>
           <span className="text-stone-300">/</span>
           <span className="text-stone-400">{policy.category}</span>
         </Link>

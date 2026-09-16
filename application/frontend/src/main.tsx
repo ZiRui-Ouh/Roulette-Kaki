@@ -19,12 +19,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         {/* App supplies the shared header, page area, and footer. */}
         <Routes>
           <Route element={<App />}>
-            {/* Each route selects the page shown inside App's Outlet. */}
-            <Route index element={<PolicyNewsFeed />} />
+            {/* Main landing page is now the Parliament Debate Digest feature */}
+            <Route index element={<FeedPage />} />
+            <Route path="/debates" element={<Navigate to="/" replace />} />
+            <Route path="/debates/:date" element={<DetailPage />} />
+            {/* Policy Feed & Dispatches accessible as a dedicated feature */}
+            <Route path="/policies" element={<PolicyNewsFeed />} />
             <Route path="/policy/:id" element={<PolicyArticlePage />} />
             <Route path="/query" element={<QueryPage />} />
-            <Route path="/debates" element={<FeedPage />} />
-            <Route path="/debates/:date" element={<DetailPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

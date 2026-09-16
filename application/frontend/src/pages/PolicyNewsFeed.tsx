@@ -5,6 +5,8 @@ import {
   FileText,
   Sparkles,
   ArrowRight,
+  ArrowLeft,
+  Landmark,
   Search,
 } from "lucide-react";
 import { POLICIES } from "../data/policies";
@@ -54,7 +56,22 @@ export default function PolicyNewsFeed() {
     filteredPolicies.length > 1 ? filteredPolicies.slice(1) : [];
 
   return (
-    <div className="pb-16 max-w-7xl mx-auto space-y-10">
+    <div className="pb-16 max-w-7xl mx-auto space-y-8">
+      {/* Feature Context Breadcrumb */}
+      <div className="flex items-center justify-between gap-4 pt-1 pb-3 border-b border-stone-200">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-2 text-xs font-semibold text-stone-600 hover:text-indigo-600 transition"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <Landmark className="w-3.5 h-3.5 text-stone-500" />
+          <span>Back to Parliament Debates</span>
+        </Link>
+        <div className="text-xs text-stone-400 font-medium hidden sm:block">
+          Official Singapore Policy Feed &bull; Sourced from .gov.sg
+        </div>
+      </div>
+
       {/* Frontpage Editorial Lead Story */}
       {heroPolicy ? (
         <section>
@@ -159,7 +176,7 @@ export default function PolicyNewsFeed() {
                 </p>
                 <div className="mt-4">
                   <Link
-                    to="/debates"
+                    to="/"
                     className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
                   >
                     <span>Explore Hansard Sittings</span>
